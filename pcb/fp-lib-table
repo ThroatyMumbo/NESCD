@@ -1,0 +1,4 @@
+(fp_lib_table
+	(version 7)
+	(lib (name "cdi")(type "KiCad")(uri "${KIPRJMOD}/lib/cdi.pretty")(options "")(descr "cd_interface modules"))
+)

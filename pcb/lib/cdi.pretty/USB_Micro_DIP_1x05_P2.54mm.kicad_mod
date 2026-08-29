@@ -1,0 +1,214 @@
+(footprint "USB_Micro_DIP_1x05_P2.54mm"
+	(version 20260206)
+	(generator "pcbnew")
+	(generator_version "10.0")
+	(layer "F.Cu")
+	(descr "Micro-B USB to DIP adapter board, 1x05 on 2.54 mm plus two shell tabs. Outline is the measured 14.25 x 14.75 mm module; the USB port faces -x and must overhang the board edge.")
+	(tags "usb micro dip adapter breakout")
+	(property "Reference" "REF**"
+		(at 3.125 -7.58 0)
+		(layer "F.SilkS")
+		(uuid "0253ce58-43d8-56e9-81c2-a432caf584e8")
+		(effects
+			(font
+				(size 1 1)
+				(thickness 0.15)
+			)
+		)
+	)
+	(property "Value" "USB_Micro_DIP_1x05_P2.54mm"
+		(at 3.125 7.58 0)
+		(layer "F.Fab")
+		(uuid "b0334ea9-29c3-5377-a019-b73dccf2d6a6")
+		(effects
+			(font
+				(size 1 1)
+				(thickness 0.15)
+			)
+		)
+	)
+	(property "Datasheet" ""
+		(at 0 0 0)
+		(layer "F.Fab")
+		(hide yes)
+		(uuid "75fb64a7-a69d-4886-91e6-6b78437a03d3")
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+		)
+	)
+	(property "Description" ""
+		(at 0 0 0)
+		(layer "F.Fab")
+		(hide yes)
+		(uuid "b093a2c6-68ac-439d-928b-a673e84866dc")
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+		)
+	)
+	(attr through_hole)
+	(duplicate_pad_numbers_are_jumpers no)
+	(fp_rect
+		(start -13.735 -7.235)
+		(end 1.235 7.235)
+		(stroke
+			(width 0.12)
+			(type default)
+		)
+		(fill no)
+		(layer "F.SilkS")
+		(uuid "12e14e33-2049-5157-9017-80525768ffa6")
+	)
+	(fp_rect
+		(start -13.875 -7.375)
+		(end 1.375 7.375)
+		(stroke
+			(width 0.05)
+			(type default)
+		)
+		(fill no)
+		(layer "F.CrtYd")
+		(uuid "6857df9f-79e3-5b27-acf0-a01149c077fb")
+	)
+	(fp_rect
+		(start -13.625 -7.125)
+		(end 1.125 7.125)
+		(stroke
+			(width 0.1)
+			(type default)
+		)
+		(fill no)
+		(layer "F.Fab")
+		(uuid "e5b8912c-92f1-594a-81f7-974b454975f8")
+	)
+	(fp_text user "VBUS"
+		(at 2.525 -5.08 0)
+		(layer "F.SilkS")
+		(uuid "d3200a7f-703c-52e4-8eab-60f5332f63b2")
+		(effects
+			(font
+				(size 0.8 0.8)
+				(thickness 0.12)
+			)
+			(justify left)
+		)
+	)
+	(fp_text user "D-"
+		(at 2.525 -2.54 0)
+		(layer "F.SilkS")
+		(uuid "f4b71b2f-3273-559b-a3f0-f9d6ff425c4c")
+		(effects
+			(font
+				(size 0.8 0.8)
+				(thickness 0.12)
+			)
+			(justify left)
+		)
+	)
+	(fp_text user "D+"
+		(at 2.525 0 0)
+		(layer "F.SilkS")
+		(uuid "d0da47c5-9824-5c2d-b371-37e1744f2544")
+		(effects
+			(font
+				(size 0.8 0.8)
+				(thickness 0.12)
+			)
+			(justify left)
+		)
+	)
+	(fp_text user "ID"
+		(at 2.525 2.54 0)
+		(layer "F.SilkS")
+		(uuid "482570f7-27e3-5a11-852a-0e6f8e73fe11")
+		(effects
+			(font
+				(size 0.8 0.8)
+				(thickness 0.12)
+			)
+			(justify left)
+		)
+	)
+	(fp_text user "GND"
+		(at 2.525 5.08 0)
+		(layer "F.SilkS")
+		(uuid "b39d02f7-1e8f-5723-a254-2509a6ea5841")
+		(effects
+			(font
+				(size 0.8 0.8)
+				(thickness 0.12)
+			)
+			(justify left)
+		)
+	)
+	(pad "1" thru_hole rect
+		(at 0 5.08)
+		(size 1.7 1.7)
+		(drill 1)
+		(layers "*.Cu" "*.Mask")
+		(remove_unused_layers no)
+		(uuid "44c40ef9-a368-5bb2-b425-3562d6633005")
+	)
+	(pad "2" thru_hole circle
+		(at 0 2.54)
+		(size 1.7 1.7)
+		(drill 1)
+		(layers "*.Cu" "*.Mask")
+		(remove_unused_layers no)
+		(uuid "127c4a98-4ae3-5d54-a007-c866d5ee161e")
+	)
+	(pad "3" thru_hole circle
+		(at 0 0)
+		(size 1.7 1.7)
+		(drill 1)
+		(layers "*.Cu" "*.Mask")
+		(remove_unused_layers no)
+		(uuid "a0e26b5a-a5c6-5177-86aa-5f1dbfbc2b2f")
+	)
+	(pad "4" thru_hole circle
+		(at 0 -2.54)
+		(size 1.7 1.7)
+		(drill 1)
+		(layers "*.Cu" "*.Mask")
+		(remove_unused_layers no)
+		(uuid "bbff9f38-6dea-59c5-8c0a-3b312004a636")
+	)
+	(pad "5" thru_hole circle
+		(at 0 -5.08)
+		(size 1.7 1.7)
+		(drill 1)
+		(layers "*.Cu" "*.Mask")
+		(remove_unused_layers no)
+		(uuid "11534796-e161-56f0-9c26-c81f3cec9eb9")
+	)
+	(pad "SH" thru_hole circle
+		(at -7.8 -5.125)
+		(size 1.7 1.7)
+		(drill 1)
+		(layers "*.Cu" "*.Mask")
+		(remove_unused_layers no)
+		(uuid "fe41ffbb-4308-546a-89fe-ad579bd571d7")
+	)
+	(pad "SH" thru_hole circle
+		(at -7.8 5.125)
+		(size 1.7 1.7)
+		(drill 1)
+		(layers "*.Cu" "*.Mask")
+		(remove_unused_layers no)
+		(uuid "d9010a16-d3c9-5b1d-8cad-fc86400cc658")
+	)
+	(embedded_fonts no)
+	(model "${KIPRJMOD}/lib/3dmodels/USB_Micro_DIP_1x05_P2.54mm.step"
+		(offset (xyz 0 0 0))
+		(scale (xyz 1 1 1))
+		(rotate (xyz 0 0 0))
+	)
+	(model "${KIPRJMOD}/models/10104111C.stp"
+		(offset (xyz -11.008 0 4.82))
+		(scale (xyz 1 1 1))
+		(rotate (xyz 90 0 -90))
+	)
+)

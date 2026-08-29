@@ -1,0 +1,5 @@
+# KiCad local state — carries a git username, ssh key path and window layout
+*.kicad_prl
+*-unsaved-export-*
+cdi-backups/
+fp-info-cache
