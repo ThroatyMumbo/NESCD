@@ -1,0 +1,81 @@
+; ata.pio - parallel-ATA host strobes for the RP2350B (PGA2350).
+;
+; Pin ownership while PIO is attached to the bus:
+;   IN/OUT base GP2, count 16    DD0..DD15, shared by both programs
+;   SM_RD side-set base GP23     DIOR#, active low
+;   SM_WR side-set base GP24     DIOW#, active low
+; DA0..2 (GP18..20), CS0#/CS1# (GP21/22), RESET# (GP25) and DMACK# (GP29)
+; stay on SIO and are moved by the CPU with one masked store.
+;
+; BOTH PROGRAMS MUST BE LOADED INTO THE SAME PIO BLOCK. The pin output-value
+; and output-enable registers are per-PIO, not per-state-machine, and a pad's
+; funcsel selects one instance - a program on the other block would find its
+; OUT PINDIRS never reaching a pad.
+;
+; Each program takes (word count - 1) from its TX FIFO, so a single taskfile
+; register access is count 0 and runs the same code path as a 1024-word sector
+; burst. Side-set is re-applied on every stall cycle, so a machine parked on
+; the leading PULL actively holds its strobe deasserted.
+;
+; The delay slots tagged <patch> are rewritten by ata_set_pio_mode() from the
+; ATA-4 timing minima. INSTR_MEM is write-only, so the patcher re-emits whole
+; instructions from ata_rd_program_instructions[] rather than read-modify-write.
+; The values here are the ATA PIO Mode 0 schedule at a 30 ns tick.
+
+.pio_version 1
+
+; ---------------------------------------------------------------- read ------
+
+.program ata_rd
+.side_set 1                          ; DIOR#
+
+.define PUBLIC I_SETUP 3             ; out pindirs : t1 address setup
+.define PUBLIC I_LOW   4             ; nop side 0  : t2 pulse width
+.define PUBLIC I_HIGH  5             ; in pins     : recovery to t0
+
+.wrap_target
+    pull  block        side 1        ; park here; the stall holds DIOR# high
+    mov   x, osr       side 1
+    mov   osr, null    side 1
+    out   pindirs, 16  side 1 [4]    ; DD -> input; <patch> t1
+rd_loop:
+    nop                side 0 [5]    ; DIOR# falls; <patch> t2
+    in    pins, 16     side 1 [12]   ; sample AT the rise; <patch> recovery
+    jmp   x-- rd_loop  side 1
+.wrap
+
+; The sample sits on the instruction that raises DIOR#. ATA guarantees read
+; data valid only in [rise - t5, rise + t6]; the input synchronizer makes the
+; latched value the bus ~2 sysclk before the edge, which is inside that window
+; at every clkdiv. Sampling mid-pulse is correct at one clkdiv only.
+
+; --------------------------------------------------------------- write ------
+
+.program ata_wr
+.side_set 1                          ; DIOW#
+
+.define PUBLIC I_SETUP 3             ; out pindirs : t1 address setup
+.define PUBLIC I_DSU   4             ; out pins    : t3 data setup
+.define PUBLIC I_LOW   5             ; nop side 0  : t2 pulse width
+.define PUBLIC I_HIGH  6             ; jmp x--     : t4 hold + recovery
+
+.wrap_target
+    pull  block        side 1        ; park here; the stall holds DIOW# high
+    mov   x, osr       side 1
+    mov   osr, ~null   side 1
+    out   pindirs, 32  side 1 [4]    ; DD -> output; <patch> t1
+wr_loop:
+    out   pins, 16     side 1 [1]    ; drive data, DIOW# still high; <patch> t3
+    nop                side 0 [5]    ; DIOW# falls; <patch> t2
+    jmp   x-- wr_loop  side 1 [11]   ; rise latches; <patch> t4 hold + recovery
+    mov   osr, null    side 1
+    out   pindirs, 32  side 1        ; release the bus, then wrap to the stall
+.wrap
+
+; Both OUT PINDIRS are 32 wide although OUT_COUNT bounds them to 16 pins: the
+; instruction still consumes 32 OSR bits, which drives the shift counter to
+; PULL_THRESH and triggers the autopull refill. The opening one therefore has
+; data[0] in the OSR before the loop's first OUT PINS - at 16 wide the counter
+; would sit at 16 and that first data cycle would drive 0xFFFF from ~null onto
+; a live bus. The closing one empties the OSR so the wrapped PULL blocks for
+; real, instead of being a no-op on a full OSR.

@@ -1,0 +1,73 @@
+;
+; 16-bit stereo I2S transmitter for PCM5102-class DACs.
+;
+; Side-set drives the two clocks:
+;   side-set bit 0 -> LRCK (word clock / word select)
+;   side-set bit 1 -> BCK  (bit clock)
+; The single OUT pin drives DIN (serial data).
+;
+; LRCK is the lower-numbered pin because side-set takes a contiguous pair, so
+; BCK is always LRCK + 1.
+;
+; Each channel slot is 16 data bits at 2 PIO cycles per bit, so a stereo
+; frame costs 64 PIO cycles. The state machine clock must therefore be
+; set to sample_rate * 64.
+;
+; Data is presented while BCK is low and sampled by the DAC on the rising
+; edge. LRCK changes one BCK period before the MSB of the slot it selects,
+; which is the standard (Philips) I2S framing the PCM5102 expects.
+;
+
+.program audio_i2s
+.side_set 2
+
+; LRCK high -> right channel. Autopull (32-bit threshold, shift left) means
+; the high half-word of each DMA word goes out here.
+right_slot:
+    out pins, 1            side 0b01
+    jmp x-- right_slot     side 0b11
+    out pins, 1            side 0b00     ; last bit; LRCK drops for left slot
+    set x, 14              side 0b10
+
+; LRCK low -> left channel, fed from the low half-word.
+left_slot:
+    out pins, 1            side 0b00
+    jmp x-- left_slot      side 0b10
+    out pins, 1            side 0b01     ; last bit; LRCK rises for right slot
+    set x, 14              side 0b11
+
+% c-sdk {
+#include "hardware/clocks.h"
+
+// data_pin -> DIN
+// lrck_pin -> LRCK, lrck_pin + 1 -> BCK
+//
+// The pins live above GP31 on this board, so the PIO instance runs with
+// GPIOBASE 16 and the pin masks have to go through the 64-bit calls.
+static inline void audio_i2s_program_init(PIO pio, uint sm, uint offset,
+                                          uint data_pin, uint lrck_pin,
+                                          uint sample_rate) {
+    pio_sm_config c = audio_i2s_program_get_default_config(offset);
+    sm_config_set_out_pins(&c, data_pin, 1);
+    sm_config_set_sideset_pins(&c, lrck_pin);
+    // Shift left (MSB first), autopull at 32 bits = one stereo frame.
+    sm_config_set_out_shift(&c, false, true, 32);
+    sm_config_set_fifo_join(&c, PIO_FIFO_JOIN_TX);
+
+    float div = (float)clock_get_hz(clk_sys) / (sample_rate * 64);
+    sm_config_set_clkdiv(&c, div);
+
+    pio_gpio_init(pio, data_pin);
+    pio_gpio_init(pio, lrck_pin);
+    pio_gpio_init(pio, lrck_pin + 1);
+
+    pio_sm_init(pio, sm, offset, &c);
+
+    uint64_t pin_mask = (1ull << data_pin) | (3ull << lrck_pin);
+    pio_sm_set_pindirs_with_mask64(pio, sm, pin_mask, pin_mask);
+    pio_sm_set_pins_with_mask64(pio, sm, 0, pin_mask);
+
+    // Prime the bit counter so the very first slot is a full 16 bits.
+    pio_sm_exec(pio, sm, pio_encode_set(pio_x, 14));
+}
+%}

@@ -4,29 +4,53 @@
 
 An unofficial homemade CD add-on for the NES, just because!
 
-This repo contains the schematics, PCB, 3D printable STLs for the shell, and sticker labels.
-
-Firmware is on hold because it currently contains semi-reverse engineered code from Something Nerdy's 'Bad Apple' FMV demo, which I've chosen not to publish.
-At some point I may push a stripped down version of the firmware that only includes the in-game CD audio feature. Need some time to work on that.
+This repo contains the schematics, PCB, 3D printable STLs for the shell, sticker labels, and the firmware.
 
 ## How it works
 
-It's basically an RP2350B hooked up to both an Everdrive N8 Pro and an IDE CD drive. It reads the game ROM off the CD, uploads it to the Everdrive over USB,
-launches it, and then waits for audio or FMV requests from the game via CHR mailbox at 0x21FF8. The RP2350B is the coordinater in the middle that bridges
-the NES/Everdrive and the CD drive.
-
-The video frames for FMVs are streamed to the Everdrive over USB and read into VRAM using custom bitstream code for the Cyclone IV (the FPGA the Everdrive N8 Pro uses).
-The audio is simply piped directly from a PCM5102 DAC to the audio mux in pin on the NES expansion port.
+It's basically an RP2350B hooked up to both an Everdrive N8 Pro and an IDE CD drive. It reads the game ROM off the CD, uploads it to the Everdrive over USB
+and asks the menu to install it, then watches a mailbox byte in the cart's CHR RAM for the game to ask for music. The RP2350B is the coordinator in the
+middle that bridges the NES/Everdrive and the CD drive.
 
 ## Hardware
-- The main PCB (see [hardware/](hardware/))
+- The main PCB (see [pcb/](pcb/))
 - A standard 40-pin IDE CD drive
 - Everdrive N8 Pro
+
+## Build
+
+```
+cd firmware && ./flash.sh
+```
+
+## Making a disc
+
+The demo game needs [cc65](https://cc65.github.io/) (`ca65`/`ld65`), plus
+`python3` with `numpy`, `ffmpeg` for the audio, and `xorriso` to burn.
+
+```
+cd game && make         # demo.nes, four music tracks, and build/demo.img
+cd game && make burn    # burn build/demo.img and read it back to check
+```
+
+To put your own game on a disc, pass [`mkgamedisc.py`](firmware/tools/mkgamedisc.py)
+an iNES ROM and one track per music byte:
+
+```
+python3 firmware/tools/mktrack.py theme.wav -o theme.rom --loop-start 4.2
+python3 firmware/tools/mkgamedisc.py -o mygame.img --title "MY GAME" --nes mygame.nes --track 1=theme.rom --verify
+firmware/burn.sh mygame.img
+```
+
+## Using it
+
+If everything goes right, you should be able to just put a burned disc into the CD drive while the NES is on and sitting on the Everdrive menu.
+It'll auto-boot the game once it's read and uploaded to the Everdrive.
 
 ## FAQ
 
 ### What?
-Great question! I came up with the idea for this project while reading about the cancelled SNES CD-ROM add-on. I was originally going to make my own
+Great question! I came up with the idea for this project while reading about the canceled SNES CD-ROM add-on. I was originally going to make my own
 version of that add-on, but decided it'd be funnier and weirder if I took it a step further and made one for NES.
 
 ### Why?
@@ -36,11 +60,11 @@ Because it's fun.
 It's me! Your old pal - Throaty Mumbo!
 
 ### Why not stream audio from the Everdrive?
-I originally wanted to do this, since that's how the Something Nerdy FMV demo handles it, but was hitting a ceiling on the Everdrive USB bandwidth.
-I'd likely have to either add some form of aggressive compression or drop the video frame rate to make room. It's also a nice touch to use the expansion port instead.
+I originally wanted to do this, but was hitting a ceiling on the Everdrive USB bandwidth. I'd likely have to add some form of aggressive compression
+to make room. It's also a nice touch to use the expansion port instead.
 
-In fact, I'd like to send the video over the expansion port as well if possible, since the USB cable poking out on the front is by far the biggest
-blemish on the design of this contraption. Unfortunately the bandwidth on the expansion port is even more limited than the USB route.
+The USB cable poking out on the front is by far the biggest blemish on the design of this contraption, so I did look at moving everything to the
+expansion port. Unfortunately the bandwidth there is even more limited than the USB route.
 
 Plus, the expansion port audio allows more flexibility with mixing and volume control - hence the volume knob on the front.
 
