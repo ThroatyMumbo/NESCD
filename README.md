@@ -19,7 +19,7 @@ The video frames for FMVs are streamed to the Everdrive over USB and read into V
 The audio is simply piped directly from a PCM5102 DAC to the audio mux in pin on the NES expansion port.
 
 ## Hardware
-- The main PCB (see [hardware/](hardware/))
+- The main PCB (see [pcb/](pcb/))
 - A standard 40-pin IDE CD drive
 - Everdrive N8 Pro
 
