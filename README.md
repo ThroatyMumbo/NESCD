@@ -12,6 +12,8 @@ It's basically an RP2350B hooked up to both an Everdrive N8 Pro and an IDE CD dr
 and asks the menu to install it, then watches a mailbox byte in the cart's CHR RAM for the game to ask for music. The RP2350B is the coordinator in the
 middle that bridges the NES/Everdrive and the CD drive.
 
+Project video: https://www.youtube.com/watch?v=6D8RWVwW4ZI
+
 ## Hardware
 - The main PCB (see [pcb/](pcb/))
 - A standard 40-pin IDE CD drive
@@ -68,6 +70,13 @@ Because it's fun.
 
 ### Who?
 It's me! Your old pal - Throaty Mumbo!
+
+### Where are the FMVs you showed in the video?
+I chose not to include any FMV-related code here because to get that working I had to semi-reverse engineer
+Something Nerdy's [Bad Apple!! Ultimate NES Demake](https://somethingnerdy.com/downloads/), which is currently closed source.
+The team has mentioned they're planning to formally open source their MXM mapper (which this demo presumably uses, actually not sure)
+once their game *Former Dawn* is released. I didn't feel good about publishing reverse engineered code from an indie development team
+for my stupid meme project, especially when they have plans to release it themselves.
 
 ### Why not stream audio from the Everdrive?
 I originally wanted to do this, but was hitting a ceiling on the Everdrive USB bandwidth. I'd likely have to add some form of aggressive compression
