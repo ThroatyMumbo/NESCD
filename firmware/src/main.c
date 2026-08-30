@@ -23,6 +23,7 @@
 #include "bgm.h"
 #include "catalog.h"
 #include "cdcore.h"
+#include "cdda.h"
 #include "diag.h"
 #include "disc.h"
 #include "disctask.h"
@@ -33,6 +34,7 @@
 #include "knob.h"
 #include "mailbox.h"
 #include "n8push.h"
+#include "player.h"
 #include "psram.h"
 #include "track.h"
 #include "usb_link.h"
@@ -98,13 +100,19 @@ static void help(void)
            "  O [0|1]      autoplay on insertion, and the disc's ROM on the menu (now %s)\n"
            "  Y            spin the drive up after a failed acquisition\n"
            "  (the panel button on GP33 toggles the tray, between commands)\n"
+           "audio cd player (the NCDP ROM on the cart drives it through the mailbox):\n"
+           "  C            state, track, the drive's cd-da capability\n"
+           "  C t          the disc's table of contents\n"
+           "  C p [n]      play track n (or resume); C h pause/resume; C s stop\n"
+           "  C n | v      next / previous track;  C e | l  eject / load\n"
+           "  G p          arm the player by hand (it arms itself on the ROM)\n"
            "audio out (pcm5102 i2s dac):\n"
            "  M            toggle the jingle\n"
            "  B [track]    play track n off the disc as background music, its loop\n"
            "               range honored; bare B stops (the game's mailbox\n"
            "               overrides while G is armed)\n"
            "  V [-dB|k]    output level, 0 to -%d dBFS (now %d); V k = panel pot\n"
-           "  T [hz]       toggle a full-scale sine for level calibration\n"
+           "  T [hz] [l|r] toggle a full-scale sine for level calibration\n"
            "on-board psram:\n"
            "  P [bytes]    size, memtest, throughput, cache checks (default 1M)\n"
            "wiring diagnostics (no live drive needed):\n"
@@ -501,10 +509,12 @@ static void do_push_run(void)
 
 static void do_disc_stats(void)
 {
-    const track_stat_t *t = &track_stat;
-    printf("  track:    %s, %lu blocks, %lu lap(s), next seq %lu\n",
-           t->running ? "running" : "idle", (unsigned long)t->blocks,
-           (unsigned long)t->laps, (unsigned long)track_next_seq());
+    const disc_stat_t *t = &disc_stat;
+    const disc_job_t *job = disctask_job();
+    printf("  %s: %s, %lu blocks, %lu lap(s), next seq %lu\n",
+           job ? job->name : "producer", t->running ? "running" : "idle",
+           (unsigned long)t->blocks, (unsigned long)t->laps,
+           (unsigned long)(job == &cdda_job ? cdda_next_seq() : track_next_seq()));
     printf("  reads:    %lu chunks, %lu retries, worst %lu ms, settle %lu\n",
            (unsigned long)t->chunks, (unsigned long)t->retries,
            (unsigned long)t->worst_read_ms, (unsigned long)disc_settle_tries);
@@ -525,14 +535,16 @@ static void do_disc_stats(void)
         printf("\n");
     }
     bgm_report();
+    player_report();
 }
 
-// -- autoplay --------------------------------------------------------------
+// -- the tray, and autoplay --------------------------------------------------
 //
 // Polled from the console's idle loop and nowhere else, so core1 is parked when
 // TEST UNIT READY goes out. One command a second, and only once a drive has
 // answered IDENTIFY - against a dead or absent bus every packet costs its full
-// 5 s timeout.
+// 5 s timeout. The poll identifies whatever goes in; autoplay only decides
+// whether a game disc boots.
 
 #define AUTOPLAY_POLL_MS 1000u
 #define AUTOPLAY_IDLE_MS 10000u      // a shut tray with no medium: stop poking it
@@ -546,7 +558,8 @@ static void disc_gone(void);
 static bool bus_free(void)
 {
     if (!disctask_busy()) return true;
-    printf("  core1 owns the drive (track streaming) - B stops it\n");
+    printf("  core1 owns the drive (%s streaming) - B or C s stops it\n",
+           disctask_job()->name);
     return false;
 }
 
@@ -589,6 +602,7 @@ static bool disc_acquire(void)
 {
     bool played = audio_is_playing();
     if (played) { bgm_stop(); audio_stop(); }
+    disc_speed_reset();                  // a bus reset returns the drive to its default
 
     bool ok = false;
     for (uint32_t r = 1; r <= ACQUIRE_ROUNDS && !ok; r++) {
@@ -610,15 +624,16 @@ static bool disc_acquire(void)
 }
 
 // True when it printed, so the caller can redraw the prompt.
-static bool autoplay_poll(void)
+static bool media_poll(void)
 {
-    if (!autoplay_on || !identify[0]) return false;
-    if (disctask_busy()) return false;           // a track owns the drive
+    if (!identify[0]) return false;
+    if (disctask_busy()) return false;           // a producer owns the drive
     if (!time_reached(autoplay_due)) return false;
     autoplay_due = make_timeout_time_ms(AUTOPLAY_POLL_MS);
 
     int st = media_state();
     if (st < 0) return false;
+    player_media(st, media_shut_empty);
     bool was = media_present;
     media_present = (st == 1);
     if (!media_present) {
@@ -643,6 +658,39 @@ static bool autoplay_poll(void)
     // the cart shows its menu.
     if (!was) { autoplay_pending = true; open_fails = 0; }
     if (!autoplay_pending) return false;
+
+    // The kind of disc first, off its TOC: a READ(10) of an audio track fails
+    // 5/64 and would be retried for a minute before the catalog gave up.
+    if (!cdda_is_open() && !catalog_is_open()) {
+        int rc = cdda_open();
+        if (rc == CD_OK) {
+            autoplay_pending = autoplay_waiting = false;
+            const cdda_toc_t *t = cdda_toc();
+            uint8_t m, s;
+            cdda_msf(t->leadout - t->start[t->first], &m, &s);
+            printf("\nmedia: audio cd, %u track(s), %u:%02u%s\n", t->last, m, s,
+                   player_armed() ? "" : " - start the CD player ROM to play it");
+            player_disc_in();
+            return true;
+        }
+        if (rc == CD_EDISCIO && ++open_fails < GAME_OPEN_POLLS) {
+            if (open_fails > 1) return false;
+            printf("\nmedia: toc read failed (sense %u/%02X/%02X) - retrying\n",
+                   atapi_sense_key, atapi_sense_asc, atapi_sense_ascq);
+            return true;
+        }
+        if (rc != CD_ENOAUDIO && rc != CD_ESHAPE) {
+            autoplay_pending = autoplay_waiting = false;
+            printf("\nmedia: %s\n", cd_strerror(rc));
+            return true;
+        }
+        player_disc_other();
+    }
+    if (!autoplay_on) {
+        autoplay_pending = autoplay_waiting = false;
+        printf("\nmedia: data disc in, autoplay off\n");
+        return true;
+    }
 
     // The cart is the one thing worth waiting for: the NES may still be coming
     // up when the disc goes in, so the insertion stays pending. edn8_open() is
@@ -680,14 +728,9 @@ static void do_autoplay(const char *arg)
 {
     if (*arg == '0' || *arg == '1') {
         bool on = (*arg == '1');
-        // Enabling it latches the tray as it stands, so a disc that was already
-        // in does not read as an insertion; only the next one boots. 'O' is
-        // outside the bus gate, so a track streaming means core1 owns the
-        // drive -- and a disc it is reading is present by definition.
-        if (on && !autoplay_on && identify[0]) {
-            media_present = disctask_busy() ? true : (media_state() == 1);
-            autoplay_pending = autoplay_waiting = false;
-        }
+        // The tray is tracked either way; enabling only forgets an insertion
+        // still owed, so a disc already in does not boot until the next one.
+        if (on && !autoplay_on) autoplay_pending = autoplay_waiting = false;
         autoplay_on = on;
     }
     printf("  autoplay: %s\n", autoplay_on ? "on" : "off");
@@ -725,6 +768,7 @@ static uint32_t booted_crc;          // the ROM item pushed this cart session
 
 // The cart's own state, polled once a second while a game disc is open.
 #define CART_POLL_MS 1000u
+#define CART_OPEN_RETRY_MS 5000u
 static absolute_time_t cart_due;
 static int  cart_st = -1;            // last edn8_status(), -1 unknown
 static bool cart_mounted;            // the USB link, as of the last cart poll
@@ -762,6 +806,15 @@ static uint32_t track_consumer_seq(void)
     return bgm_active() ? bgm_cursor() : track_start;
 }
 
+// A game-disc read must not open the catalog over an audio cd: a READ(10) on
+// an audio track spends the whole retry budget.
+static bool audio_disc_in(void)
+{
+    if (!cdda_is_open()) return false;
+    printf("  an audio cd is in - C plays it\n");
+    return true;
+}
+
 // Open the item, start core1 at the resume point and wait for the first chunk
 // of blocks before handing the DAC to bgm.c.
 static int track_play(uint32_t id)
@@ -777,15 +830,15 @@ static int track_play(uint32_t id)
     if (rc != CD_OK) return rc;
     uint32_t start = bgm_resume_seq(id);
     track_start = start;
-    track_consumer = track_consumer_seq;
+    disc_consumer = track_consumer_seq;
     if ((rc = disctask_track(start)) != CD_OK) return rc;
 
     absolute_time_t give = make_timeout_time_ms(TRACK_START_MS);
-    while (track_stat.blocks == 0 && disctask_busy() && !time_reached(give)) {
+    while (disc_stat.blocks == 0 && disctask_busy() && !time_reached(give)) {
         usb_link_pump();
         sleep_ms(2);
     }
-    if (track_stat.blocks == 0) {
+    if (disc_stat.blocks == 0) {
         int prc = disctask_stop(35000);
         return prc != CD_OK ? prc : CD_EDISCIO;
     }
@@ -795,7 +848,7 @@ static int track_play(uint32_t id)
 // True when it printed, so the caller can redraw the prompt.
 static bool game_poll(void)
 {
-    if (!game_on) return false;
+    if (!game_on || player_armed()) return false;   // the player owns the page
     if (!time_reached(game_due)) return false;
     game_due = make_timeout_time_ms(GAME_POLL_MS);
 
@@ -916,7 +969,8 @@ static void game_report(void)
 
 static void do_game(const char *arg)
 {
-    if (*arg == '0') { game_disarm(); game_report(); return; }
+    if (*arg == '0') { player_disarm(); game_disarm(); game_report(); player_report(); return; }
+    if (*arg == 'p') { player_arm(false); player_report(); return; }
     if (*arg == '1') {
         if (!catalog_is_open()) { printf("  no game disc open\n"); return; }
         bgm_forget();                    // a saved cursor belongs to the old source
@@ -931,7 +985,10 @@ static void do_game(const char *arg)
 static void disc_gone(void)
 {
     if (catalog_is_open()) printf("  game disc removed\n");
+    if (cdda_is_open()) printf("  audio cd removed\n");
     catalog_close();
+    cdda_close();
+    player_disc_out();
     disc_speed_reset();
     if (game_src == SRC_DISC) game_src = SRC_NONE;
     media_present = false;
@@ -1007,12 +1064,17 @@ static void game_disc_insert(void)
     game_launch();
 }
 
-// The cart's own state, once a second while a game disc is in: the menu with
-// the disc's game not running boots it, which is what a power-on, a reset and
-// an insertion have in common. cart_st gates every mailbox read.
+// A ROM that just started gets this long before its mailbox page is read for
+// the CD player's magic: its tile upload blanks the page first.
+static bool magic_pending;
+static absolute_time_t magic_due;
+
+// The cart's own state, once a second: the menu with a game disc's ROM not
+// running boots it, which is what a power-on, a reset and an insertion have
+// in common, and a ROM that starts carrying the CD player's magic arms the
+// player. cart_st gates every mailbox read.
 static bool cart_poll(void)
 {
-    if (!catalog_is_open()) return false;
     if (!time_reached(cart_due)) return false;
     cart_due = make_timeout_time_ms(CART_POLL_MS);
 
@@ -1023,17 +1085,45 @@ static bool cart_poll(void)
         cart_st = -1;
         cart_boot_armed = true;
         cart_mounted = false;
+        magic_pending = false;
+        player_disarm();
         printf("\ncart: link down - the game reloads once the menu is back\n");
         return true;
     }
     cart_mounted = mounted;
     if (!mounted) return false;
-    if (!edn8_is_open() && edn8_open(2000) != EDN8_OK) return false;
+    // A cart that enumerates but does not answer costs 2 s per attempt, so
+    // not every second.
+    static absolute_time_t open_retry;
+    if (!edn8_is_open()) {
+        if (!time_reached(open_retry)) return false;
+        open_retry = make_timeout_time_ms(CART_OPEN_RETRY_MS);
+        if (edn8_open(2000) != EDN8_OK) return false;
+    }
 
     uint8_t st;
     if (edn8_status(&st) != EDN8_OK) { cart_st = -1; return false; }
     int prev = cart_st;
     cart_st = st;
+    if (st == EDN8_ST_GAME && prev != (int)EDN8_ST_GAME && !player_armed()) {
+        magic_pending = true;
+        magic_due = make_timeout_time_ms(GAME_BOOT_POLL_MS);
+    }
+    if (st != EDN8_ST_GAME) {
+        magic_pending = false;
+        if (player_armed()) {
+            printf("\ncart: the CD player ROM is no longer running - player off\n");
+            player_disarm();
+            return true;
+        }
+    } else if (magic_pending && time_reached(magic_due)) {
+        magic_pending = false;
+        if (player_magic_ok()) {
+            printf("\ncart: the CD player ROM is running - player armed\n");
+            player_arm(true);
+            return true;
+        }
+    }
     if (!catalog_is_open()) return false;    // the rest is the disc's ROM
     if (st == EDN8_ST_GAME) {
         cart_boot_armed = true;
@@ -1067,12 +1157,14 @@ static bool task_poll(void)
     }
     int rc;
     if (!disctask_reap(&rc)) return false;
+    const disc_job_t *job = disctask_job();
     if (rc == CD_EMEDIUM) {
-        printf("\ntrack: the disc was removed\n");
+        printf("\n%s: the disc was removed\n", job->name);
         bgm_stop();
         disc_gone();
         return true;
     }
+    if (job == &cdda_job) return player_reap(rc);
     if (rc != CD_OK) {
         printf("\ntrack: %s\n", cd_strerror(rc));
         // Read it first: bgm_stop() releases the DAC, and bgm_track() is 0
@@ -1097,6 +1189,7 @@ static bool item_tick(uint32_t done, uint32_t total)
 
 static void do_catalog_info(const char *arg)
 {
+    if (audio_disc_in()) return;
     int rc = catalog_open();
     if (rc != CD_OK) { printf("  game disc: %s\n", cd_strerror(rc)); return; }
     const cat_hdr_t *h = catalog_hdr();
@@ -1130,6 +1223,7 @@ static void do_game_load(const char *arg)
         return;
     }
     if (!catalog_is_open()) {
+        if (audio_disc_in()) return;
         int rc = catalog_open();
         if (rc != CD_OK) { printf("  game disc: %s\n", cd_strerror(rc)); return; }
     }
@@ -1172,6 +1266,7 @@ static void do_bgm(const char *arg)
         // track_play() after the catalog has already been read.
         if (disctask_busy()) disctask_stop(35000);
         if (!catalog_is_open() && media_present) {
+            if (audio_disc_in()) return;
             int rc = catalog_open();
             if (rc != CD_OK) { printf("  game disc: %s\n", cd_strerror(rc)); return; }
         }
@@ -1305,13 +1400,18 @@ static void do_tone(const char *arg)
         printf("  audio: no PIO/DMA resources - I2S is inert\n");
         return;
     }
-    tone_reset((uint32_t)strtoul(arg, NULL, 10));
+    char *end = NULL;
+    uint32_t hz = (uint32_t)strtoul(arg, &end, 10);
+    while (end && *end == ' ') end++;
+    char ch = end ? *end : 0;
+    tone_reset(hz, ch);
     if (!audio_start(tone_fill)) {
         printf("  audio: could not start\n");
         return;
     }
-    printf("  audio: %lu Hz sine at 0 dBFS, output %d dBFS\n",
-           (unsigned long)tone_hz(), audio_get_atten_db());
+    printf("  audio: %lu Hz sine at 0 dBFS, output %d dBFS%s\n",
+           (unsigned long)tone_hz(), audio_get_atten_db(),
+           ch == 'l' ? ", left only" : ch == 'r' ? ", right only" : "");
 }
 
 // Output level, in dB below full scale. Takes effect live, so the level can be
@@ -1350,9 +1450,10 @@ static void read_line(char *buf, int max)
             // DMA IRQ is not running, and the knob still has to track.
             if (!audio_is_playing()) knob_poll();
             if (n == 0 && task_poll()) printf("cd> ");
-            if (n == 0 && autoplay_poll()) printf("cd> ");
+            if (n == 0 && media_poll()) printf("cd> ");
             if (n == 0 && cart_poll()) printf("cd> ");
             if (n == 0 && game_poll()) printf("cd> ");
+            if (n == 0 && player_poll()) printf("cd> ");
             if (n == 0 && identify[0] && !disctask_busy() && eject_poll())
                 printf("cd> ");
             continue;
@@ -1437,6 +1538,7 @@ int main(void)
 
         case 'x':
             printf("hard reset...\n");
+            disc_speed_reset();
             ata_hard_reset();
             do_reset_wait();
             do_identify();
@@ -1458,7 +1560,10 @@ int main(void)
         }
 
         case 'u': report("TEST UNIT READY", atapi_wait_ready(30000)); break;
-        case 'e': report("eject", atapi_start_stop(ATAPI_SS_EJECT)); break;
+        case 'e':
+            disc_speed_reset();
+            report("eject", atapi_start_stop(ATAPI_SS_EJECT));
+            break;
         case 'l': report("load",  atapi_start_stop(ATAPI_SS_LOAD));  break;
 
         case 'k': {
@@ -1517,6 +1622,7 @@ int main(void)
         case 'O': do_autoplay(arg); break;
         case 'Y': disc_acquire(); break;
         case 'G': do_game(arg); break;
+        case 'C': player_console(arg); break;
         case 'L': do_catalog_info(arg); break;
         case 'J': do_game_load(arg); break;
         case 'M': do_audio(arg); break;

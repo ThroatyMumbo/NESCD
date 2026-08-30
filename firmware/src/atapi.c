@@ -167,6 +167,41 @@ int atapi_set_cd_speed(uint16_t read_kb_s)
     return atapi_packet(cdb, NULL, 0, NULL);
 }
 
+int atapi_read_toc(void *buf, size_t len, size_t *got)
+{
+    if (len > 0xFFFF) len = 0xFFFF;
+    uint8_t cdb[ATAPI_CDB_LEN] = {
+        ATAPI_READ_TOC, 0, 0, 0, 0, 0,
+        0,                                // starting track
+        (uint8_t)(len >> 8), (uint8_t)len,
+        0, 0, 0
+    };
+    return atapi_packet(cdb, buf, len, got);
+}
+
+int atapi_read_cd(uint32_t lba, uint32_t nsec, uint8_t flags, void *buf,
+                  size_t maxlen, size_t *got)
+{
+    uint8_t cdb[ATAPI_CDB_LEN] = {
+        ATAPI_READ_CD, 0x04,              // expected sector type: CD-DA
+        (uint8_t)(lba >> 24), (uint8_t)(lba >> 16), (uint8_t)(lba >> 8), (uint8_t)lba,
+        (uint8_t)(nsec >> 16), (uint8_t)(nsec >> 8), (uint8_t)nsec,
+        flags, 0, 0
+    };
+    return atapi_packet(cdb, buf, maxlen, got);
+}
+
+int atapi_mode_sense_cap(void *buf, size_t len, size_t *got)
+{
+    if (len > 0xFFFF) len = 0xFFFF;
+    uint8_t cdb[ATAPI_CDB_LEN] = {
+        ATAPI_MODE_SENSE10, 0, 0x2A, 0, 0, 0, 0,
+        (uint8_t)(len >> 8), (uint8_t)len,
+        0, 0, 0
+    };
+    return atapi_packet(cdb, buf, len, got);
+}
+
 int atapi_wait_ready(uint32_t timeout_ms)
 {
     absolute_time_t end = make_timeout_time_ms(timeout_ms);

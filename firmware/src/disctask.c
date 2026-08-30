@@ -19,6 +19,7 @@
 #include "usb_link.h"
 
 static volatile uint32_t cmd_gen, ack_gen, cmd_arg;
+static const disc_job_t *volatile cmd_job;
 static volatile int      cmd_rc;
 static bool launched;
 static uint32_t reaped_gen;          // last job the idle loop has acted on
@@ -42,7 +43,7 @@ static void core1_main(void)
         uint32_t g = __atomic_load_n(&cmd_gen, __ATOMIC_ACQUIRE);
         if (g == ack_gen) { __wfe(); continue; }
 
-        cmd_rc = track_fill(cmd_arg);
+        cmd_rc = cmd_job->run(cmd_arg);
         __atomic_store_n(&ack_gen, g, __ATOMIC_RELEASE);
     }
 }
@@ -65,27 +66,32 @@ bool disctask_init(void)
 bool disctask_ready(void) { return launched; }
 bool disctask_busy(void) { return cmd_gen != ack_gen; }
 
-int disctask_track(uint32_t start_seq)
+int disctask_run(const disc_job_t *job, uint32_t start_seq)
 {
     if (!launched) return CD_EPSRAM;
     if (disctask_busy()) return CD_EDISCIO;
-    track_reset();
+    job->reset();
 
     // The drive belongs to core1 for the duration, so its waits must stop
     // pumping a host stack that core0 is already driving.
     ata_wait_hook = NULL;
 
     cmd_arg = start_seq;
+    cmd_job = job;                    // ordered by the release on cmd_gen
     reaped_gen = cmd_gen;             // this job is the one to reap next
     __atomic_store_n(&cmd_gen, cmd_gen + 1u, __ATOMIC_RELEASE);
     __sev();
     return CD_OK;
 }
 
+int disctask_track(uint32_t start_seq) { return disctask_run(&track_job, start_seq); }
+
+const disc_job_t *disctask_job(void) { return cmd_job; }
+
 int disctask_stop(uint32_t timeout_ms)
 {
-    if (!launched) return CD_OK;
-    track_stop();
+    if (!launched || !cmd_job) return CD_OK;
+    cmd_job->stop();
 
     // Core1 may be parked in a 30 s BSY wait. Taking the bus back before it
     // returns is the one unrecoverable mistake here, so time out rather than

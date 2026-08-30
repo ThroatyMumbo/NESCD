@@ -28,6 +28,7 @@ add_executable(nescd
     src/bgm.c
     src/catalog.c
     src/cdcore.c
+    src/cdda.c
     src/diag.c
     src/disc.c
     src/disctask.c
@@ -38,6 +39,7 @@ add_executable(nescd
     src/knob.c
     src/mailbox.c
     src/n8push.c
+    src/player.c
     src/psram.c
     src/tone.c
     src/track.c

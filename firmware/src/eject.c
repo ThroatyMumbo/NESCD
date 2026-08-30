@@ -7,6 +7,7 @@
 #include "pico/stdlib.h"
 
 #include "atapi.h"
+#include "disc.h"
 
 static bool ready, raw, state, armed, saw_low;
 static absolute_time_t changed;
@@ -67,6 +68,7 @@ bool eject_poll(void)
 bool eject_toggle(void)
 {
     bool load = tray_is_open();
+    disc_speed_reset();                    // whatever comes next is a new disc
     int rc = atapi_start_stop(load ? ATAPI_SS_LOAD : ATAPI_SS_EJECT);
     const char *what = load ? "load" : "eject";
     if (rc == ATAPI_OK) { printf("\n  button: %s ok\n", what); return true; }

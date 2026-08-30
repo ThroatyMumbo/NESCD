@@ -47,6 +47,16 @@ firmware/burn.sh mygame.img
 If everything goes right, you should be able to just put a burned disc into the CD drive while the NES is on and sitting on the Everdrive menu.
 It'll auto-boot the game once it's read and uploaded to the Everdrive.
 
+### Playing an audio CD
+
+Arguably the most practical use for this thing: A CD player!
+
+`make` in the `game` directory also builds `build/cdplayer.nes`. Copy the ROM to the Everdrive's SD card (or push it over USB),
+start it from the menu, and put any ordinary audio CD in the drive. I regret not thinking of this very obvious use case in the
+video I did this on thing. Oh well!
+
+<img src="screenshots/cd_player.png" alt="Audio CD player" width="320">
+
 ## FAQ
 
 ### What?

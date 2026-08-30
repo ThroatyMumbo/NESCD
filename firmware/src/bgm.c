@@ -7,11 +7,13 @@
 #include "pico/stdlib.h"
 
 #include "ablock.h"
+#include "atapi.h"
 #include "audio.h"
 #include "audiofmt.h"
 #include "bgm.h"
 #include "bgmloop.h"
 #include "cdcore.h"
+#include "cdda.h"
 #include "disc.h"
 #include "track.h"
 
@@ -72,16 +74,21 @@ static void __not_in_flash_func(bgm_fill)(uint32_t *out, uint n)
             src.spr - cur.ab.off <= FADE_TAIL)
             cur.fading = true;
 
-        int32_t s = cur.hole ? 0 : ablock_next(&cur.ab, src.fmt);
-        s = (int32_t)(((int64_t)s * (int64_t)cur.amp) >> 16);
+        int32_t l = 0, r = 0;
+        if (!cur.hole) {
+            if (src.fmt == AFMT_CDDA) ablock_next2(&cur.ab, &l, &r);
+            else l = r = ablock_next(&cur.ab, src.fmt);
+        }
+        l = (int32_t)(((int64_t)l * (int64_t)cur.amp) >> 16);
+        r = (int32_t)(((int64_t)r * (int64_t)cur.amp) >> 16);
         if (cur.fading || cur.hold) {
             cur.amp = cur.amp > AUDIO_FADE_OUT ? cur.amp - AUDIO_FADE_OUT : 0u;
         } else if (cur.amp < 0xFFFFu) {
             cur.amp += AUDIO_FADE_STEP;
             if (cur.amp > 0xFFFFu) cur.amp = 0xFFFFu;
         }
-        uint16_t u = (uint16_t)(int16_t)s;
-        out[i] = ((uint32_t)u << 16) | u;         // mono to both channels
+        // The high half-word is the right slot (audio_i2s.pio).
+        out[i] = ((uint32_t)(uint16_t)(int16_t)r << 16) | (uint16_t)(int16_t)l;
         cur.ab.off++;
     }
 
@@ -119,6 +126,14 @@ int bgm_play_src(const bgm_source_t *s, uint32_t key, uint32_t start_seq)
     track_cur = key;
     if (!audio_start(bgm_fill)) { track_cur = 0; return CD_ENOAUDIO; }
 
+    if (src.fmt == AFMT_CDDA) {
+        uint32_t left = src.nblocks - start_seq;
+        printf("  bgm: track %lu (%s), lba %lu to %lu (%lu:%02lu)\n",
+               (unsigned long)key, src.name, (unsigned long)start_seq,
+               (unsigned long)src.nblocks, (unsigned long)(left / 75u / 60u),
+               (unsigned long)(left / 75u % 60u));
+        return CD_OK;
+    }
     printf("  bgm: track %lu (%s), %s, %lu blocks (%lu.%01lu s)%s%s\n",
            (unsigned long)key, src.name,
            src.fmt == AFMT_PCM16 ? "pcm16" : "adpcm4",
@@ -156,6 +171,19 @@ int bgm_play_disc(uint32_t key, uint32_t start_seq)
         .loop_start = t->loop_start, .loop_end = t->loop_end,
     };
     return bgm_play_src(&s, key, start_seq);
+}
+
+int bgm_play_cdda(uint32_t key, uint32_t start_lba)
+{
+    const cdda_toc_t *t = cdda_toc();
+    uint8_t n = cdda_track_of(start_lba);
+    if (!t || !cdda_is_audio(n)) return CD_ENOAUDIO;
+    bgm_source_t s = {
+        .block = disc_block, .fmt = AFMT_CDDA, .spr = CDDA_SPR,
+        .blk = ATAPI_CDDA_BYTES, .nblocks = t->audio_end[n], .loop = false,
+        .name = "audio cd",
+    };
+    return bgm_play_src(&s, key, start_lba);
 }
 
 void bgm_stop(void)

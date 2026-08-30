@@ -8,6 +8,7 @@
 #include <stdint.h>
 
 #include "cdcore.h"
+#include "disctask.h"
 
 #define TRACK_MAGIC  "CDTRACK"      // 8 bytes with its NUL
 #define TRACK_VER    2u
@@ -69,6 +70,7 @@ const track_t *track_info(void);
 
 // Producer, core1. Slots are tagged with a MONOTONIC seq (the disc index is
 // bgmloop.h's fold), so a lap seam can never alias an unplayed block's slot.
+// Counters land in disc_stat; the consumer's cursor is disc_consumer.
 int  track_fill(uint32_t start_seq);
 void track_stop(void);
 void track_reset(void);
@@ -76,15 +78,6 @@ uint32_t track_next_seq(void);       // the producer's cursor
 bool track_eos(void);                // a non-looping track read out
 bool track_medium_gone(void);
 
-// The consumer's cursor, read on the producer core; NULL holds at start_seq.
-extern uint32_t (*track_consumer)(void);
-
-typedef struct {
-    volatile uint32_t running, chunks, retries, blocks, laps, worst_read_ms;
-    volatile uint32_t last_sense;
-    volatile int32_t  last_rc;
-} track_stat_t;
-
-extern track_stat_t track_stat;
+extern const disc_job_t track_job;   // the three above, for disctask_run()
 
 #endif

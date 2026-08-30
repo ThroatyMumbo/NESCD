@@ -223,7 +223,7 @@ static void track_checks(const cat_item_t *it, const char *ref)
     printf("\n");
 
     disc_idle = consume_one;
-    track_consumer = consumer;
+    disc_consumer = consumer;
     trk_wrong = trk_checked = 0;
 
     // Across the loop seam, or to the end of a one-shot. Two seams on a range:
@@ -233,9 +233,9 @@ static void track_checks(const cat_item_t *it, const char *ref)
     rc = track_run(0, t->loop ? span : 0);
     check(rc == CD_OK, "track: fill from block 0");
     check(trk_wrong == 0, "track: every block == the standalone .rom's bytes");
-    if (t->loop) check(track_stat.laps >= (t->loop_end ? 2u : 1u), "track: wrapped");
+    if (t->loop) check(disc_stat.laps >= (t->loop_end ? 2u : 1u), "track: wrapped");
     else         check(track_eos() && cons_seq == t->nblocks, "track: one-shot read out and ended");
-    printf("    %u blocks checked, %u chunks, %u laps\n", trk_checked, track_stat.chunks, track_stat.laps);
+    printf("    %u blocks checked, %u chunks, %u laps\n", trk_checked, disc_stat.chunks, disc_stat.laps);
 
     // Restart at the three residues of a 740 B block inside a sector.
     for (uint32_t s = 0; s < 3; s++) {
@@ -258,12 +258,12 @@ static void track_checks(const cat_item_t *it, const char *ref)
     reads = 0; fail_every = 2;
     trk_wrong = 0;
     rc = track_run(0, t->loop ? t->nblocks : 0);
-    check(rc == CD_OK && track_stat.retries > 0 && trk_wrong == 0,
+    check(rc == CD_OK && disc_stat.retries > 0 && trk_wrong == 0,
           "track: read errors are retried and the blocks still match");
     fail_every = 0;
 
     disc_idle = NULL;
-    track_consumer = NULL;
+    disc_consumer = NULL;
     if (trk_ref) free((void *)trk_ref);
     trk_ref = NULL;
 }

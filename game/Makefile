@@ -7,13 +7,24 @@ TOOLS := ../firmware/tools
 SRC   := ../firmware/src
 
 ROM    := $(BUILD)/demo.nes
+PLAYER := $(BUILD)/cdplayer.nes
 TRACKS := $(BUILD)/track1.rom $(BUILD)/track2.rom $(BUILD)/track3.rom \
           $(BUILD)/track4.rom
 LOOPS  := $(PCM)/loops.csv
 IMG    := $(BUILD)/demo.img
 TITLE  ?= NESCD DEMO
 
-all: $(IMG)
+all: $(IMG) $(PLAYER)
+
+# The audio CD player: no disc image, the ROM goes on the cart by hand.
+$(PLAYER): cdplayer.s gen_font.py gen_tiles.py game.cfg mkrom.py Makefile
+	@mkdir -p $(BUILD)
+	$(PY) gen_font.py $(BUILD)/font.chr
+	$(CA65) cdplayer.s -g --bin-include-dir $(BUILD) \
+		-l $(BUILD)/cdplayer.lst -o $(BUILD)/cdplayer.o
+	$(LD65) -C game.cfg $(BUILD)/cdplayer.o -m $(BUILD)/cdplayer.map \
+		-Ln $(BUILD)/cdplayer.sym -o $(BUILD)/cdplayer.bin
+	$(PY) mkrom.py $(BUILD)/cdplayer.bin $@
 
 $(ROM): demo.s gen_tiles.py game.cfg mkrom.py Makefile
 	@mkdir -p $(BUILD)
@@ -46,14 +57,19 @@ disc: $(IMG)
 burn: $(IMG)
 	../firmware/burn.sh $(IMG)
 
-# Read the image back with the firmware's own readers, no hardware attached.
-check: $(IMG)
+# Read the image back with the firmware's own readers, no hardware attached;
+# the CD player ROM runs on pyntendo when it is installed.
+check: $(IMG) $(PLAYER)
 	gcc -O2 -I $(SRC) -o $(BUILD)/host_loop ../firmware/test/host_loop.c
 	$(BUILD)/host_loop
 	gcc -O2 -I $(SRC) -I ../firmware/test/stub -o $(BUILD)/host_game \
 		../firmware/test/host_game.c $(addprefix $(SRC)/,catalog.c track.c \
 		disc.c n8push.c cdcore.c)
 	$(BUILD)/host_game $(IMG) --track 1=$(BUILD)/track1.rom
+	gcc -O2 -I $(SRC) -I ../firmware/test/stub -o $(BUILD)/host_cdda \
+		../firmware/test/host_cdda.c $(addprefix $(SRC)/,cdda.c disc.c cdcore.c)
+	$(BUILD)/host_cdda
+	$(PY) emu_smoketest.py
 
 clean:
 	rm -rf $(BUILD)

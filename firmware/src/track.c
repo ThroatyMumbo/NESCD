@@ -15,9 +15,6 @@ static bool opened;
 static volatile uint32_t stop_req, eos_flag, gone_flag, next_seq;
 static uint8_t carry[DISC_BLOCK_MAX] __attribute__((aligned(4)));
 
-uint32_t (*track_consumer)(void);
-track_stat_t track_stat;
-
 static int check_hdr(const trk_hdr_t *h, uint32_t sectors)
 {
     if (memcmp(h->magic, TRACK_MAGIC, 8) != 0) return CD_ETRKFMT;
@@ -44,7 +41,7 @@ static int check_hdr(const trk_hdr_t *h, uint32_t sectors)
 int track_open(uint32_t lba, uint32_t sectors)
 {
     opened = false;
-    int rc = disc_prepare_at(lba);
+    int rc = disc_prepare_at(lba, NULL);
     if (rc != CD_OK) return rc;
 
     uint8_t *buf = disc_chunk_buf();
@@ -75,27 +72,10 @@ bool track_medium_gone(void) { return __atomic_load_n(&gone_flag, __ATOMIC_ACQUI
 void track_reset(void)
 {
     stop_req = eos_flag = gone_flag = 0;
-    memset(&track_stat, 0, sizeof(track_stat));
+    disc_stat_reset();
 }
 
-// Hold TRACK_DEPTH blocks ahead of the consumer: a steady trickle rather than
-// a fill and a long idle, which makes the drive park and re-seek. The producer
-// owns the drive while it waits, so the tray poll has to happen here.
-static bool wait_depth(uint32_t seq, uint32_t start_seq)
-{
-    uint32_t parked_at = disc_now_ms ? disc_now_ms() : 0;
-    for (;;) {
-        uint32_t c = track_consumer ? track_consumer() : start_seq;
-        // Signed: a consumer that ran ahead through holes must pull, not park.
-        if ((int32_t)(seq - c) < (int32_t)TRACK_DEPTH) return true;
-        if (stop_req) return false;
-        if (!disc_heartbeat(&parked_at)) {
-            __atomic_store_n(&gone_flag, 1u, __ATOMIC_RELEASE);
-            return false;
-        }
-        if (disc_idle) disc_idle();
-    }
-}
+const disc_job_t track_job = { track_fill, track_stop, track_reset, "track" };
 
 // A range's last block is the array's last (check_hdr), so the producer always
 // reads to the end and seeks back to ls_blk -- 0 when the whole array loops.
@@ -122,11 +102,11 @@ int track_fill(uint32_t start_seq)
     uint32_t carry_n = 0, tries = 0;
     int rc = CD_OK;
 
-    track_stat.running = 1u;
+    disc_stat.running = 1u;
     __atomic_store_n(&next_seq, seq, __ATOMIC_RELEASE);
 
     while (!stop_req) {
-        if (!wait_depth(seq, start_seq)) {
+        if (!disc_wait_depth(seq, start_seq, TRACK_DEPTH, &stop_req, &gone_flag)) {
             if (track_medium_gone()) rc = CD_EMEDIUM;
             break;
         }
@@ -135,7 +115,7 @@ int track_fill(uint32_t start_seq)
             if (!t.loop) { __atomic_store_n(&eos_flag, 1u, __ATOMIC_RELEASE); break; }
             seek_blk(loop.ls_blk, &lba, &skip);
             carry_n = 0; idx = loop.ls_blk;
-            track_stat.laps++;
+            disc_stat.laps++;
             continue;
         }
         uint32_t n = end - lba;
@@ -144,13 +124,10 @@ int track_fill(uint32_t start_seq)
         size_t got = 0;
         uint32_t t0 = disc_now_ms ? disc_now_ms() : 0;
         int arc = atapi_read10(lba, (uint16_t)n, chunk, (size_t)n * DISC_SECTOR, &got);
-        uint32_t ms = (disc_now_ms ? disc_now_ms() : 0) - t0;
-        if (ms > track_stat.worst_read_ms) track_stat.worst_read_ms = ms;
+        disc_stat_read_ms(t0);
 
         if (arc != ATAPI_OK || got != (size_t)n * DISC_SECTOR) {
-            track_stat.last_rc = arc;
-            track_stat.last_sense = ((uint32_t)atapi_sense_key << 16)
-                                  | ((uint32_t)atapi_sense_asc << 8) | atapi_sense_ascq;
+            disc_stat_read_failed(arc);
             // 2/3A is the tray open or the disc out: nothing to retry.
             if (arc == ATAPI_ECHECK && atapi_sense_key == 0x02 && atapi_sense_asc == 0x3A) {
                 __atomic_store_n(&gone_flag, 1u, __ATOMIC_RELEASE);
@@ -158,12 +135,12 @@ int track_fill(uint32_t start_seq)
                 break;
             }
             if (++tries > TRACK_RETRIES) { rc = CD_EDISCIO; break; }
-            track_stat.retries++;
+            disc_stat.retries++;
             atapi_wait_ready(2000);
             continue;
         }
         tries = 0;
-        track_stat.chunks++;
+        disc_stat.chunks++;
 
         // Whole blocks go to their slot straight from the chunk; the block a
         // chunk boundary splits is carried over to the next one.
@@ -185,13 +162,13 @@ int track_fill(uint32_t start_seq)
                 carry_n = 0;
             }
             seq++; idx++;
-            track_stat.blocks++;
+            disc_stat.blocks++;
             __atomic_store_n(&next_seq, seq, __ATOMIC_RELEASE);
             if (idx == t.nblocks) {
                 if (!t.loop) { __atomic_store_n(&eos_flag, 1u, __ATOMIC_RELEASE); goto done; }
                 seek_blk(loop.ls_blk, &lba, &skip);   // one seek per lap
                 carry_n = 0; idx = loop.ls_blk;
-                track_stat.laps++;
+                disc_stat.laps++;
                 wrapped = true;
                 break;
             }
@@ -199,6 +176,6 @@ int track_fill(uint32_t start_seq)
         if (!wrapped) lba += n;
     }
 done:
-    track_stat.running = 0u;
+    disc_stat.running = 0u;
     return rc;
 }

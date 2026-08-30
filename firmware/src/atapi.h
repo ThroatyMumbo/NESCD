@@ -19,7 +19,24 @@
 #define ATAPI_START_STOP_UNIT 0x1Bu
 #define ATAPI_READ_CAPACITY   0x25u
 #define ATAPI_READ10          0x28u
+#define ATAPI_READ_TOC        0x43u
+#define ATAPI_MODE_SENSE10    0x5Au
 #define ATAPI_SET_CD_SPEED    0xBBu
+#define ATAPI_READ_CD         0xBEu
+
+// READ CD byte 9: 0x10 is user data alone, 0xF8 asks for every field, and for
+// CD-DA both come back as the same 2352 bytes. Some 1990s firmware takes only
+// the second form for audio.
+#define ATAPI_RCD_USER   0x10u
+#define ATAPI_RCD_ALL    0xF8u
+#define ATAPI_CDDA_BYTES 2352u
+
+// READ TOC format 0 is a 4-byte header and one of these per track; 0xAA is
+// the lead-out. Audio when bit 2 of ctrl is clear.
+#define ATAPI_TOC_HDR    4u
+#define ATAPI_TOC_DESC   8u
+#define ATAPI_TOC_LEADOUT 0xAAu
+#define ATAPI_TOC_MAX    (ATAPI_TOC_HDR + 100u * ATAPI_TOC_DESC)
 
 // START/STOP UNIT byte 4: bit0 = Start, bit1 = LoEj.
 #define ATAPI_SS_STOP  0x00u
@@ -55,6 +72,19 @@ int atapi_read_capacity(uint32_t *last_lba, uint32_t *block_size);
 int atapi_read10(uint32_t lba, uint16_t blocks, void *buf, size_t maxlen,
                  size_t *got);
 int atapi_set_cd_speed(uint16_t read_kb_s);
+
+// The disc's table of contents, format 0, LBA addressing. Drives answer fewer
+// bytes than asked for, so *got is the only size to trust.
+int atapi_read_toc(void *buf, size_t len, size_t *got);
+
+// nsec raw CD-DA sectors of ATAPI_CDDA_BYTES each. `flags` is byte 9.
+int atapi_read_cd(uint32_t lba, uint32_t nsec, uint8_t flags, void *buf,
+                  size_t maxlen, size_t *got);
+
+// MODE SENSE(10) of the CD capabilities page (2A): an 8-byte mode header, then
+// the page. Byte 5 of the page body: bit 0 CD-DA supported, bit 1 stream
+// accurate.
+int atapi_mode_sense_cap(void *buf, size_t len, size_t *got);
 
 // Retry TEST UNIT READY while the drive reports "becoming ready" after a
 // disc change or spin-up. Returns ATAPI_OK once the medium is usable.

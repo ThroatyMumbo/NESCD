@@ -14,9 +14,11 @@
 static int16_t  tab[TSIZE];
 static bool     built;
 static uint32_t phase, inc, hz_now;
+static uint32_t mask = 0xFFFFFFFFu;   // which slots carry it: high half = right
 
-void tone_reset(uint32_t hz)
+void tone_reset(uint32_t hz, char channel)
 {
+    mask = channel == 'l' ? 0x0000FFFFu : channel == 'r' ? 0xFFFF0000u : 0xFFFFFFFFu;
     if (!built) {
         for (uint32_t i = 0; i < TSIZE; i++)
             tab[i] = (int16_t)lrintf(32767.0f
@@ -35,7 +37,7 @@ void __not_in_flash_func(tone_fill)(uint32_t *out, uint n)
 {
     for (uint i = 0; i < n; i++) {
         uint16_t s = (uint16_t)tab[phase >> (32 - TBITS)];
-        out[i] = ((uint32_t)s << 16) | s;
+        out[i] = (((uint32_t)s << 16) | s) & mask;
         phase += inc;
     }
 }

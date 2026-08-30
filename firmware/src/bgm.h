@@ -30,6 +30,10 @@ int  bgm_play_src(const bgm_source_t *s, uint32_t key, uint32_t start_seq);
 // start_seq.
 int  bgm_play_disc(uint32_t key, uint32_t start_seq);
 
+// The open audio disc from an LBA to the end of its audio run, stereo; `key`
+// is the track number. The cdda producer must already be running past it.
+int  bgm_play_cdda(uint32_t key, uint32_t start_lba);
+
 // Where a resume of `key` would start: the saved cursor when it is the track
 // that played last and has not played out, else 0.
 uint32_t bgm_resume_seq(uint32_t key);

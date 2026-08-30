@@ -7,5 +7,8 @@
 #define AFMT_NONE   0u
 #define AFMT_PCM16  1u              // mono s16le, 2 * spr bytes
 #define AFMT_ADPCM4 2u              // ima adpcm 4-bit, see ima.h
+#define AFMT_CDDA   3u              // stereo s16le interleaved, 4 * spr bytes: a raw CD-DA sector
+
+#define CDDA_SPR    588u            // stereo frames in one 2352-byte sector
 
 #endif

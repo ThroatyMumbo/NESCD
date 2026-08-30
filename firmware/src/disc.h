@@ -33,9 +33,13 @@ extern uint32_t disc_fail_sense[DISC_READ_TRIES];
 
 // Spin the drive up and set the read speed once per disc. SET CD SPEED opens a
 // seconds-long 5/64 window, so it is not repeated, and with disc_pause_ms set
-// the window is waited out by polling a read of lba.
-int  disc_prepare_at(uint32_t lba);
-int  disc_prepare(void);            // prepare_at(0)
+// the window is waited out by polling `probe` on lba - a one-sector read of
+// the kind the caller is about to issue, since READ(10) never succeeds on an
+// audio track. NULL probes with READ(10).
+typedef bool (*disc_probe_fn)(uint32_t lba);
+int  disc_prepare_at(uint32_t lba, disc_probe_fn probe);
+int  disc_prepare(void);            // prepare_at(0, NULL)
+bool disc_probe_read10(uint32_t lba);
 void disc_speed_reset(void);        // the medium changed: set it again
 extern uint32_t disc_settle_tries;  // reads the last SET CD SPEED cost
 
@@ -53,6 +57,31 @@ bool disc_heartbeat(uint32_t *parked_at);
 extern uint32_t (*disc_now_ms)(void);
 extern void     (*disc_idle)(void);        // run while waiting
 extern void     (*disc_pause_ms)(uint32_t ms);   // core0 only; NULL off-target
+
+// -- what every producer shares ---------------------------------------------
+
+// The consumer's cursor, read on the producer core; NULL holds at start_seq.
+extern uint32_t (*disc_consumer)(void);
+
+// Hold `depth` blocks ahead of the consumer: a steady trickle rather than a
+// fill and a long idle, which makes the drive park and re-seek. False once
+// *stop_req is set, or with *gone_flag set once the tray poll says 2/3A.
+bool disc_wait_depth(uint32_t seq, uint32_t start_seq, uint32_t depth,
+                     volatile uint32_t *stop_req, volatile uint32_t *gone_flag);
+
+// One struct for whichever producer ran last, so S and the first-chunk waits
+// read the same counters.
+typedef struct {
+    volatile uint32_t running, chunks, retries, blocks, laps, worst_read_ms;
+    volatile uint32_t last_sense;              // packed key/asc/ascq
+    volatile int32_t  last_rc;
+} disc_stat_t;
+
+extern disc_stat_t disc_stat;
+
+void disc_stat_reset(void);
+void disc_stat_read_failed(int arc);         // packs the sense of a failed read
+uint32_t disc_stat_read_ms(uint32_t t0);     // ms since t0, folded into worst_read_ms
 
 // -- audio slots -----------------------------------------------------------
 //

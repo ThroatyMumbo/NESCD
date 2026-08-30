@@ -6,6 +6,7 @@
 #ifndef MAILBOX_H
 #define MAILBOX_H
 
+#include <stddef.h>
 #include <stdint.h>
 
 // A stock core maps 8 KiB of CHR RAM at the upper 4 MB of the CHR window
@@ -18,10 +19,19 @@
 // This build serves no requests, so $FF is the only answer it ever gives.
 #define MAILBOX_FAIL 0xFFu
 
+// The 16 bytes of sprite tile $FF, $1FF0..$1FFF, are the whole page; the CD
+// player ROM uses the rest of it (player.h).
+#define MAILBOX_PAGE        0x401FF0u
+#define MAILBOX_HOST(ppu)   (0x400000u + (uint32_t)(ppu))
+
 // The request pair, read twice because a poll can land mid-write; CD_EMBOX
 // means the two disagreed.
 int mailbox_rd(uint8_t v[2]);
 
+// The same double read of n bytes at PPU address ppu ($1FF0..$1FFF).
+int mailbox_rd_at(uint32_t ppu, uint8_t *v, size_t n);
+
 int mailbox_status_wr(uint8_t v);
+int mailbox_wr_at(uint32_t ppu, const uint8_t *v, size_t n);
 
 #endif

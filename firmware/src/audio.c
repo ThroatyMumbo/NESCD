@@ -50,10 +50,10 @@ static void __not_in_flash_func(apply_atten)(uint32_t *b, uint n)
             atten_cur = atten_cur + ATTEN_SLEW > tgt ? tgt : atten_cur + ATTEN_SLEW;
         else if (atten_cur > tgt)
             atten_cur = atten_cur < tgt + ATTEN_SLEW ? tgt : atten_cur - ATTEN_SLEW;
-        int32_t l = (int16_t)(b[i] >> 16), r = (int16_t)b[i];
+        int32_t r = (int16_t)(b[i] >> 16), l = (int16_t)b[i];   // high half = right slot
         l = (l * (int32_t)atten_cur) >> 16;
         r = (r * (int32_t)atten_cur) >> 16;
-        b[i] = ((uint32_t)(uint16_t)(int16_t)l << 16) | (uint16_t)(int16_t)r;
+        b[i] = ((uint32_t)(uint16_t)(int16_t)r << 16) | (uint16_t)(int16_t)l;
     }
 }
 

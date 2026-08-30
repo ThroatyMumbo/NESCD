@@ -43,7 +43,13 @@ int disc_read_sectors(uint32_t lba, uint32_t nsec, void *buf)
 
 uint32_t disc_settle_tries;
 
-int disc_prepare_at(uint32_t lba)
+bool disc_probe_read10(uint32_t lba)
+{
+    size_t got = 0;
+    return atapi_read10(lba, 1, scratch, DISC_SECTOR, &got) == ATAPI_OK && got == DISC_SECTOR;
+}
+
+int disc_prepare_at(uint32_t lba, disc_probe_fn probe)
 {
     int rc = atapi_wait_ready(30000);   // a cold drive needs its spin-up
     if (rc != ATAPI_OK) return CD_EDISCIO;
@@ -52,17 +58,16 @@ int disc_prepare_at(uint32_t lba)
     speed_set = true;
     disc_settle_tries = 0;
     if (!disc_pause_ms) return CD_OK;
+    if (!probe) probe = disc_probe_read10;
     for (uint32_t t = 0; t < SPEED_SETTLE_TRIES; t++) {
-        size_t got = 0;
         disc_settle_tries++;
-        if (atapi_read10(lba, 1, scratch, DISC_SECTOR, &got) == ATAPI_OK && got == DISC_SECTOR)
-            break;
+        if (probe(lba)) break;
         disc_pause_ms(SPEED_SETTLE_MS);
     }
     return CD_OK;
 }
 
-int disc_prepare(void) { return disc_prepare_at(0); }
+int disc_prepare(void) { return disc_prepare_at(0, NULL); }
 
 void disc_speed_reset(void) { speed_set = false; }
 
@@ -78,6 +83,44 @@ bool disc_heartbeat(uint32_t *parked_at)
     *parked_at = now;
     int rc = atapi_test_unit_ready();
     return !(rc == ATAPI_ECHECK && atapi_sense_key == 0x02 && atapi_sense_asc == 0x3A);
+}
+
+// -- shared by the producers -------------------------------------------------
+
+uint32_t (*disc_consumer)(void);
+disc_stat_t disc_stat;
+
+bool disc_wait_depth(uint32_t seq, uint32_t start_seq, uint32_t depth,
+                     volatile uint32_t *stop_req, volatile uint32_t *gone_flag)
+{
+    uint32_t parked_at = disc_now_ms ? disc_now_ms() : 0;
+    for (;;) {
+        uint32_t c = disc_consumer ? disc_consumer() : start_seq;
+        // Signed: a consumer that ran ahead through holes must pull, not park.
+        if ((int32_t)(seq - c) < (int32_t)depth) return true;
+        if (*stop_req) return false;
+        if (!disc_heartbeat(&parked_at)) {
+            __atomic_store_n(gone_flag, 1u, __ATOMIC_RELEASE);
+            return false;
+        }
+        if (disc_idle) disc_idle();
+    }
+}
+
+void disc_stat_reset(void) { memset(&disc_stat, 0, sizeof(disc_stat)); }
+
+void disc_stat_read_failed(int arc)
+{
+    disc_stat.last_rc = arc;
+    disc_stat.last_sense = ((uint32_t)atapi_sense_key << 16)
+                         | ((uint32_t)atapi_sense_asc << 8) | atapi_sense_ascq;
+}
+
+uint32_t disc_stat_read_ms(uint32_t t0)
+{
+    uint32_t ms = (disc_now_ms ? disc_now_ms() : 0) - t0;
+    if (ms > disc_stat.worst_read_ms) disc_stat.worst_read_ms = ms;
+    return ms;
 }
 
 // -- audio slots -----------------------------------------------------------

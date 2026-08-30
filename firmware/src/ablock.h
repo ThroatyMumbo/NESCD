@@ -47,6 +47,11 @@ ablock_next(ablock_t *ab, uint32_t fmt)
         uint8_t lo = ablock_take(ab), hi = ablock_take(ab);
         return (int16_t)((uint16_t)lo | ((uint16_t)hi << 8));
     }
+    if (fmt == AFMT_CDDA) {                      // mono callers get the left channel
+        uint8_t lo = ablock_take(ab), hi = ablock_take(ab);
+        (void)ablock_take(ab); (void)ablock_take(ab);
+        return (int16_t)((uint16_t)lo | ((uint16_t)hi << 8));
+    }
     uint8_t nib;
     if (ab->off & 1u) {
         nib = ab->nib_hi;
@@ -56,6 +61,16 @@ ablock_next(ablock_t *ab, uint32_t fmt)
         nib = (uint8_t)(b & 0x0Fu);
     }
     return ima_step(&ab->ima, nib);
+}
+
+// One stereo frame of an AFMT_CDDA block.
+static inline __attribute__((always_inline)) void
+ablock_next2(ablock_t *ab, int32_t *l, int32_t *r)
+{
+    uint8_t lo = ablock_take(ab), hi = ablock_take(ab);
+    *l = (int16_t)((uint16_t)lo | ((uint16_t)hi << 8));
+    lo = ablock_take(ab); hi = ablock_take(ab);
+    *r = (int16_t)((uint16_t)lo | ((uint16_t)hi << 8));
 }
 
 #endif

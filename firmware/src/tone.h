@@ -12,7 +12,8 @@
 #include <stdint.h>
 #include "pico/types.h"
 
-void tone_reset(uint32_t hz);
+// channel 'l' or 'r' leaves the other slot silent, anything else is both.
+void tone_reset(uint32_t hz, char channel);
 void tone_fill(uint32_t *frames, uint n);
 uint32_t tone_hz(void);
 
