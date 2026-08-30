@@ -94,6 +94,13 @@ a buck converter that converts the 12V input to ~9.5V so you can power the NES a
 you only need one wall outlet to get the entire thing running. You can also power the NES separately from its regular adapter - the plug
 coming out of the NESCD is optional.
 
+### Couldn't you power everything off VRAW?
+This was my initial plan, but it seemed tight considering the stock NES adapter (1.3A) has to power the NES, Everdrive, RP2350, DAC, and the CD drive.
+The power adapter for that Fideco drive sled I tested with initially outputs at 2A, so I figured a dedicated 2A molex adapter (which supposedly outputs 2A on
+5V and 12V each, at least according to the label) would be the minimum. But honestly I didn't actually test running the CD drive and everything else off
+VRAW at the same time, so this was more of a cautious choice than based off of objective measurement. If it works it'd be a nice improvement for
+an eventual v2 design.
+
 ### How do you get back to the Everdrive menu once you've inserted a disc?
 This is still something I'm trying to figure out. AFAIK there's no way to trigger a soft reset on the NES. However one guaranteed solution is to
 hook up the NES power output rail to a relay switch. That way if the board ever needs the NES to reset, it can just turn it on and off from the
