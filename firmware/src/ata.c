@@ -557,14 +557,18 @@ bool ata_set_xfer_mode(uint mode)
     return !(ata_status() & (ATA_ST_ERR | ATA_ST_DF));
 }
 
+// Zeroed on failure: callers gate on id256[0], and a floating bus bursts 0x7f7f.
 bool ata_identify_packet(uint16_t *id256)
 {
+    memset(id256, 0, 512);
     if (!ata_wait_not_bsy(5000)) return false;
     ata_select_device(0);
     ata_reg_write8(ATA_CS_CMD, ATA_REG_COMMAND, ATA_CMD_IDENTIFY_PACKET);
     if (!ata_wait_drq(5000)) return false;
     ata_read_data_burst(id256, 256);
-    return !(ata_status() & ATA_ST_ERR);
+    if (!(ata_status() & ATA_ST_ERR)) return true;
+    memset(id256, 0, 512);
+    return false;
 }
 
 void ata_id_string(const uint16_t *id, int first, int nwords, char *out, int outsz)
