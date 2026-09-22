@@ -9,27 +9,45 @@
 #include "atapi.h"
 #include "disc.h"
 
-static bool ready, raw, state, armed, saw_low;
-static absolute_time_t changed;
+static bool ready, armed, saw_low, down, was_high;
+static absolute_time_t high_since;
 
 // Re-runnable, and 'p <gpio>' is why: that diagnostic hands the pad to SIO as
 // an output and does not give it back.
 void eject_init(void)
 {
+    // Only a pad something drove has edges to drop; a real press stays latched.
+    bool driven = !ready || gpio_get_function(EJECT_PIN) != GPIO_FUNC_SIO ||
+                  gpio_is_dir_out(EJECT_PIN);
     gpio_init(EJECT_PIN);
     gpio_set_dir(EJECT_PIN, GPIO_IN);
     gpio_pull_up(EJECT_PIN);
-    if (ready) return;
     sleep_us(100);                         // let the pull-up take the pad
-    raw = state = gpio_get(EJECT_PIN);     // idle high; pressed is low
-    changed = get_absolute_time();
+    if (driven) gpio_acknowledge_irq(EJECT_PIN, GPIO_IRQ_EDGE_FALL);
+    if (ready) return;
+    was_high = false;
     ready = true;
 }
 
-// 2/3A/02 is the tray already open, against 00 and 01 for a shut tray with no
-// disc - so the toggle reads ASCQ, where media_state() only needs the ASC.
+// INTR latches the edge whether or not the IRQ is enabled, so a press made
+// while the main loop blocks is still there when it next polls.
+static bool fell(void)
+{
+    return (io_bank0_hw->intr[EJECT_PIN / 8] >> (4 * (EJECT_PIN % 8)))
+           & GPIO_IRQ_EDGE_FALL;
+}
+
+static void clear_fell(void)
+{
+    gpio_acknowledge_irq(EJECT_PIN, GPIO_IRQ_EDGE_FALL);
+}
+
+// GESN's door bit first: some drives report 2/3A/00 open and shut alike. The
+// ASCQ test (02 open, 00/01 shut) is for a drive that refuses GESN.
 static bool tray_is_open(void)
 {
+    bool open;
+    if (atapi_tray_open(&open) == ATAPI_OK) return open;
     if (atapi_test_unit_ready() == ATAPI_OK) return false;
     return atapi_sense_key == 0x02 && atapi_sense_asc == 0x3A &&
            atapi_sense_ascq == 0x02;
@@ -39,25 +57,34 @@ bool eject_pressed(void)
 {
     if (!ready) return false;
 
+    absolute_time_t t = get_absolute_time();
     bool now = gpio_get(EJECT_PIN);
-    if (now != raw) { raw = now; changed = get_absolute_time(); return false; }
-    if (absolute_time_diff_us(changed, get_absolute_time())
-        < EJECT_DEBOUNCE_MS * 1000) return false;
+    if (now && !was_high) high_since = t;
+    was_high = now;
+    bool settled = now && absolute_time_diff_us(high_since, t)
+                          >= EJECT_DEBOUNCE_MS * 1000;
 
     // A pad low when polling starts is the reset leaving GP33 unpulled, not a
     // press - reflashing would work the tray every time. Wait for a release.
     if (!armed) {
-        if (!now) { saw_low = true; return false; }
+        if (!now) saw_low = true;
+        if (!settled) return false;
         armed = true;
-        state = true;
+        clear_fell();
         if (saw_low) printf("\n  button: GP%u was low at boot - tray untouched\n",
                             (unsigned)EJECT_PIN);
         return false;
     }
 
-    if (now == state) return false;
-    state = now;
-    return !state;                         // false on the release edge
+    // Held, or bouncing on release: no new press until it has settled high.
+    if (down) {
+        if (settled) { down = false; clear_fell(); }
+        return false;
+    }
+    if (!fell()) return false;
+    clear_fell();
+    down = true;
+    return true;
 }
 
 bool eject_poll(void)

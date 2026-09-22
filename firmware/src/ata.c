@@ -22,6 +22,8 @@ void (*ata_wait_hook)(void);
 // A 1024-word sector burst is 0.6ms at Mode 0, so anything past this is a
 // wedged machine rather than a slow one.
 #define BUS_TIMEOUT_MS 50u
+#define IDENTIFY_TRIES  10
+#define IDENTIFY_DRQ_MS 500u              // a live drive answers IDENTIFY in ms
 
 static PIO      ata_pio;
 static uint     sm_rd, sm_wr, off_rd, off_wr;
@@ -558,16 +560,24 @@ bool ata_set_xfer_mode(uint mode)
 }
 
 // Zeroed on failure: callers gate on id256[0], and a floating bus bursts 0x7f7f.
+// Some drives post the signature early and drop a command sent then - no DRQ,
+// no ERR - so a silent timeout is re-issued.
 bool ata_identify_packet(uint16_t *id256)
 {
     memset(id256, 0, 512);
-    if (!ata_wait_not_bsy(5000)) return false;
-    ata_select_device(0);
-    ata_reg_write8(ATA_CS_CMD, ATA_REG_COMMAND, ATA_CMD_IDENTIFY_PACKET);
-    if (!ata_wait_drq(5000)) return false;
-    ata_read_data_burst(id256, 256);
-    if (!(ata_status() & ATA_ST_ERR)) return true;
-    memset(id256, 0, 512);
+    for (int tries = 0; tries < IDENTIFY_TRIES; tries++) {
+        if (!ata_wait_not_bsy(5000)) return false;
+        ata_select_device(0);
+        ata_reg_write8(ATA_CS_CMD, ATA_REG_COMMAND, ATA_CMD_IDENTIFY_PACKET);
+        if (!ata_wait_drq(IDENTIFY_DRQ_MS)) {
+            if (ata_altstatus() & ATA_ST_ERR) return false;
+            continue;
+        }
+        ata_read_data_burst(id256, 256);
+        if (!(ata_status() & ATA_ST_ERR)) return true;
+        memset(id256, 0, 512);
+        return false;
+    }
     return false;
 }
 

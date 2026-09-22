@@ -20,6 +20,7 @@
 #define ATAPI_READ_CAPACITY   0x25u
 #define ATAPI_READ10          0x28u
 #define ATAPI_READ_TOC        0x43u
+#define ATAPI_GET_EVENT_STATUS 0x4Au
 #define ATAPI_MODE_SENSE10    0x5Au
 #define ATAPI_SET_CD_SPEED    0xBBu
 #define ATAPI_READ_CD         0xBEu
@@ -72,6 +73,9 @@ int atapi_read_capacity(uint32_t *last_lba, uint32_t *block_size);
 int atapi_read10(uint32_t lba, uint16_t blocks, void *buf, size_t maxlen,
                  size_t *got);
 int atapi_set_cd_speed(uint16_t read_kb_s);
+
+// Door state from GET EVENT STATUS NOTIFICATION's media class (polled).
+int atapi_tray_open(bool *open);
 
 // The disc's table of contents, format 0, LBA addressing. Drives answer fewer
 // bytes than asked for, so *got is the only size to trust.

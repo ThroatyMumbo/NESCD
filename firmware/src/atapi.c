@@ -202,6 +202,20 @@ int atapi_mode_sense_cap(void *buf, size_t len, size_t *got)
     return atapi_packet(cdb, buf, len, got);
 }
 
+int atapi_tray_open(bool *open)
+{
+    uint8_t cdb[ATAPI_CDB_LEN] = { ATAPI_GET_EVENT_STATUS, 0x01, 0, 0, 0x10, 0, 0, 0, 8, 0, 0, 0 };
+    uint8_t ev[8];
+    size_t got = 0;
+
+    int rc = atapi_packet(cdb, ev, sizeof(ev), &got);
+    if (rc != ATAPI_OK) return rc;
+    // NEA set or a class other than media (4) means the drive has no answer.
+    if (got < 6 || (ev[2] & 0x80) || (ev[2] & 0x07) != 4) return ATAPI_EPARAM;
+    *open = ev[5] & 0x01;
+    return ATAPI_OK;
+}
+
 int atapi_wait_ready(uint32_t timeout_ms)
 {
     absolute_time_t end = make_timeout_time_ms(timeout_ms);
