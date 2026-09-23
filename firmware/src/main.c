@@ -41,6 +41,17 @@
 
 #define SECTOR_BYTES  2048u
 #define BULK_SECTORS  16u                     // sectors per READ(10) in 'b'
+#define RUN_LED_PIN   42u                     // panel red LED: steady = cart linked, 2 Hz blink = no cart
+#define RUN_LED_MS    250u
+
+static repeating_timer_t run_led_timer;
+
+static bool __not_in_flash_func(run_led_tick)(repeating_timer_t *t)
+{
+    (void)t;
+    gpio_put(RUN_LED_PIN, usb_link_state()->mounted || !gpio_get_out_level(RUN_LED_PIN));
+    return true;
+}
 
 // Word-aligned so the burst reads take the DMA path: DMA_SIZE_32 ignores the
 // low address bits, so ata_read_data_burst() falls back to a CPU pop loop for
@@ -1468,6 +1479,10 @@ static void read_line(char *buf, int max)
 int main(void)
 {
     stdio_init_all();          // UART0 console on GP0(TX)/GP1(RX)
+    gpio_init(RUN_LED_PIN);
+    gpio_set_dir(RUN_LED_PIN, GPIO_OUT);
+    gpio_put(RUN_LED_PIN, 1);
+    add_repeating_timer_ms(RUN_LED_MS, run_led_tick, NULL, &run_led_timer);
 
     // Before anything else touches the QMI: the M1 timing is derived from
     // clk_sys, and lines cached under the old CS1 setup are stale.
