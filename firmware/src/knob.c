@@ -11,6 +11,8 @@
 #define ADC_MAX     4095u
 #define SPAN_DB     (KNOB_LOUD_DB - KNOB_QUIET_DB)
 #define DEADBAND    6               // tenths of a dB; 1 dB steps need <10
+#define MUTE_IN     6u              // counts; the end stop measured 1-2, noise +-1
+#define MUTE_OUT    12u             // hysteresis, so the edge cannot chatter
 
 static bool ready, on;
 static uint32_t ema;
@@ -51,9 +53,19 @@ void __not_in_flash_func(knob_poll)(void)
     uint32_t v = ema >> EMA_SHIFT;
     if (v > ADC_MAX) v = ADC_MAX;
 
+    bool muted = cur_db == AUDIO_ATTEN_MUTE;
+    if (v < (muted ? MUTE_OUT : MUTE_IN)) {
+        if (!muted) {
+            cur_db = AUDIO_ATTEN_MUTE;
+            audio_set_atten_db(cur_db);
+        }
+        return;
+    }
+    v -= MUTE_IN;
+
     // Tenths of a dB of attenuation, so the deadband can be finer than a step.
     int tenths = -KNOB_QUIET_DB * 10
-               - (int)(v * (uint32_t)(SPAN_DB * 10) / ADC_MAX);
+               - (int)(v * (uint32_t)(SPAN_DB * 10) / (ADC_MAX - MUTE_IN));
     int delta = tenths - (-cur_db) * 10;
     if (delta > -DEADBAND && delta < DEADBAND) return;
 

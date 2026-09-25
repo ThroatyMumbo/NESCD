@@ -71,9 +71,13 @@ static const uint32_t atten_q16[AUDIO_ATTEN_MAX + 1] = {   // unity is 65536
 void __not_in_flash_func(audio_set_atten_db)(int db)
 {
     if (db > 0) db = -db;
-    if (db < -AUDIO_ATTEN_MAX) db = -AUDIO_ATTEN_MAX;
-    atten_db = db;
-    atten_tgt = atten_q16[-db];
+    if (db < -AUDIO_ATTEN_MAX) {
+        atten_db = AUDIO_ATTEN_MUTE;
+        atten_tgt = 0;
+    } else {
+        atten_db = db;
+        atten_tgt = atten_q16[-db];
+    }
     if (!playing) atten_cur = atten_tgt;      // nothing clocked out to ramp
 }
 

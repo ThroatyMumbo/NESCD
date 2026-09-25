@@ -19,7 +19,8 @@
 // Full clockwise is the loud end. The span is deliberately not the attenuator's
 // full 0..-40: everything above about -10 dBFS distorts on this path (see
 // CLAUDE.md), so a knob that could reach 0 would waste a quarter of its travel
-// and let a careless turn overdrive the NES aux in.
+// and let a careless turn overdrive the NES aux in. The counter-clockwise end
+// stop mutes outright, below KNOB_QUIET_DB.
 #define KNOB_LOUD_DB   -6
 #define KNOB_QUIET_DB  -36
 

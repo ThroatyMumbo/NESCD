@@ -52,6 +52,7 @@ uint     audio_pio_index(void);    // which PIO instance took the GPIOBASE 16 sl
 // a consumer aux input; this is the knob for that, since 4-bit content sits
 // ~60 dB above the DAC's own floor and cannot hear the lost headroom.
 #define AUDIO_ATTEN_MAX 40
+#define AUDIO_ATTEN_MUTE (-(AUDIO_ATTEN_MAX + 1))  // any level below -MAX mutes
 
 // Where audio_init() leaves it. Unity blows out the NES aux in on every source,
 // so it is never the right level to come up at; -18 is the measured optimum,

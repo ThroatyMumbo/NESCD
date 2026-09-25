@@ -122,7 +122,7 @@ static void help(void)
            "  B [track]    play track n off the disc as background music, its loop\n"
            "               range honored; bare B stops (the game's mailbox\n"
            "               overrides while G is armed)\n"
-           "  V [-dB|k]    output level, 0 to -%d dBFS (now %d); V k = panel pot\n"
+           "  V [-dB|k]    output level, 0 to -%d dBFS, lower mutes (now %d); V k = pot\n"
            "  T [hz] [l|r] toggle a full-scale sine for level calibration\n"
            "on-board psram:\n"
            "  P [bytes]    size, memtest, throughput, cache checks (default 1M)\n"
@@ -1440,8 +1440,11 @@ static void do_level(const char *arg)
         knob_enable(false);
         audio_set_atten_db((int)strtol(arg, NULL, 10));
     }
-    printf("  audio: output %d dBFS, %s", audio_get_atten_db(),
-           knob_enabled() ? "knob" : "manual");
+    if (audio_get_atten_db() == AUDIO_ATTEN_MUTE)
+        printf("  audio: output muted, %s", knob_enabled() ? "knob" : "manual");
+    else
+        printf("  audio: output %d dBFS, %s", audio_get_atten_db(),
+               knob_enabled() ? "knob" : "manual");
     if (knob_enabled())
         printf(" (adc %u, range %d..%d)", (unsigned)knob_raw(),
                KNOB_LOUD_DB, KNOB_QUIET_DB);
