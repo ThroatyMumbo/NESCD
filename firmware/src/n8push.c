@@ -99,7 +99,7 @@ static int put_file(const n8push_file_t *f)
     return edn8_file_close();
 }
 
-int n8push_run(void)
+int n8push_run(uint32_t mailbox_ppu)
 {
     if (!hdr) return CD_ENOIMAGE;
 
@@ -125,9 +125,9 @@ int n8push_run(void)
 
     // CHR RAM comes up undefined and the ROM does not clear the mailbox until
     // it has run its own tile upload, so seed it here: the first poll lands
-    // well inside that window and would read the garbage as a request.
-    static const uint8_t zero[4] = {0};
-    edn8_mem_wr(EDN8_ADDR_CHR + MAILBOX_ADDR, zero, sizeof zero);
+    // well inside that window and would read the garbage as a track.
+    static const uint8_t zero = 0;
+    edn8_mem_wr(EDN8_ADDR_CHR + MAILBOX_HOST(mailbox_ppu), &zero, 1);
 
     return edn8_menu_start();
 }

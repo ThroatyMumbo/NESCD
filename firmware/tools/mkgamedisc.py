@@ -14,7 +14,9 @@ whole at a sector boundary, so every masterer and every test tool is reused:
                  zero-padded to a sector, crc over the pad
 
 The ROM comes first because it is read once at insert.  A track's id is the
-value the game writes to its music mailbox at $1FF9.
+value the game writes to its music byte, at PPU $1FF9 unless --mailbox
+names another address for a game that draws every tile.  The host only ever
+reads that byte; it never writes the game's CHR.
 
 Item type 2 is reserved for items this firmware does not serve: a disc
 carrying one still opens, and the item is listed and refused.
@@ -32,7 +34,7 @@ import test_track                                            # noqa: E402
 MAGIC     = b"NESCDISC"
 VERSION   = 2
 SECTOR    = 2048
-HDR_FMT   = "<8sI32sI4I"          # magic, version, title, nitems, reserved[4]
+HDR_FMT   = "<8sI32sI4I"          # magic, version, title, nitems, mailbox_ppu, reserved[3]
 ITEM_FMT  = "<8I"                 # type, id, lba, sectors, crc32, reserved[3]
 HDR_LEN   = struct.calcsize(HDR_FMT)
 ITEM_LEN  = struct.calcsize(ITEM_FMT)
@@ -44,6 +46,7 @@ CDR_SECTORS = 359846              # an 80-minute CD-R
 ITEM_ROM, ITEM_RESERVED, ITEM_TRACK = 1, 2, 3
 ITEM_NAME = {ITEM_ROM: "rom", ITEM_RESERVED: "reserved", ITEM_TRACK: "track"}
 TRACK_MAX = 32                    # BGM_TRACK_MAX in main.c
+MAILBOX_MAX = 0x1FFF
 
 assert HDR_LEN == 64 and ITEM_LEN == 32
 assert HDR_LEN + MAXITEMS * ITEM_LEN <= SECTOR
@@ -132,17 +135,19 @@ def read_catalog(img):
             ITEM_FMT, img, HDR_LEN + i * ITEM_LEN)
         items.append(dict(type=typ, id=iid, lba=lba, sectors=sectors, crc32=crc,
                           reserved=tuple(r)))
+    if rsv[0] > MAILBOX_MAX:
+        raise ValueError(f"mailbox_ppu {rsv[0]:#x}")
     hdr = dict(version=ver, title=title.split(b"\0")[0].decode(),
-               nitems=nitems, reserved=tuple(rsv))
+               nitems=nitems, mailbox_ppu=rsv[0], reserved=tuple(rsv[1:]))
     return hdr, items
 
 
-def pack_catalog(title, items):
+def pack_catalog(title, items, mailbox_ppu=0):
     """items: [(type, id, lba, sectors, crc32)] -> one sector."""
     t = title.encode()
     if len(t) >= TITLE_LEN:
         raise SystemExit(f"title is over {TITLE_LEN - 1} bytes")
-    head = struct.pack(HDR_FMT, MAGIC, VERSION, t, len(items), 0, 0, 0, 0)
+    head = struct.pack(HDR_FMT, MAGIC, VERSION, t, len(items), mailbox_ppu, 0, 0, 0)
     for typ, iid, lba, sectors, crc in items:
         head += struct.pack(ITEM_FMT, typ, iid, lba, sectors, crc, 0, 0, 0)
     return head + b"\0" * (SECTOR - len(head))
@@ -184,6 +189,9 @@ def main():
     ap.add_argument("--sd-nes", default="nescd/game.nes",
                     help="where the ROM lands, and what the menu installs")
     ap.add_argument("--n8p", help="a prebuilt N8PUSH1 image instead of --nes")
+    ap.add_argument("--mailbox", type=lambda s: int(s, 16), metavar="PPU",
+                    help="the game's music byte at this PPU address, hex, "
+                         "instead of $1FF9")
     ap.add_argument("--track", action="append", metavar="ID=ROM",
                     help=f"a CDTRACK image as track ID (1..{TRACK_MAX})")
     ap.add_argument("--verify", action="store_true",
@@ -193,9 +201,13 @@ def main():
     tracks = parse_items(args.track, "track", TRACK_MAX)
     if 1 + len(tracks) > MAXITEMS:
         raise SystemExit(f"over {MAXITEMS} items")
+    if args.mailbox is not None and not 1 <= args.mailbox <= MAILBOX_MAX:
+        raise SystemExit(f"--mailbox {args.mailbox:x} outside 1..{MAILBOX_MAX:x}")
 
     rom, rom_src = rom_item(args)
     print(f"  rom: {rom_src}")
+    if args.mailbox:
+        print(f"  music byte: PPU ${args.mailbox:04X}")
     blobs = [(ITEM_ROM, 0, rom, len(rom))]
     srcs = [rom_src]
     for iid, path in tracks:
@@ -216,7 +228,7 @@ def main():
         out.write(b"\0" * (FIRST_LBA * SECTOR))
         cat = write_items(out, blobs)
         out.seek(0)
-        out.write(pack_catalog(args.title, cat))
+        out.write(pack_catalog(args.title, cat, args.mailbox or 0))
 
     print(f"  {args.out}: {args.title!r}, {len(cat)} items, {total} sectors "
           f"({total * SECTOR / 2**20:.1f} MiB, "

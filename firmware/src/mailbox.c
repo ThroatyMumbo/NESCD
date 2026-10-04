@@ -4,8 +4,8 @@
 #include "edn8.h"
 #include "mailbox.h"
 
-// The game writes a mailbox byte through $2007, so a poll can land between the
-// two halves of that write: take the pair only when it reads twice the same.
+// The ROM writes its page through $2007, so a poll can land between two of
+// those writes: take the bytes only when they read twice the same.
 int mailbox_rd_at(uint32_t ppu, uint8_t *v, size_t n)
 {
     uint8_t a[16], b[16];
@@ -19,14 +19,19 @@ int mailbox_rd_at(uint32_t ppu, uint8_t *v, size_t n)
     return CD_OK;
 }
 
-int mailbox_rd(uint8_t v[2]) { return mailbox_rd_at(0x1FF8u, v, 2); }
+static uint32_t base = MAILBOX_PPU;
+
+void mailbox_at(uint32_t ppu) { base = ppu; }
+
+uint32_t mailbox_where(void) { return base; }
+
+int mailbox_rd(uint8_t *v)
+{
+    int rc = edn8_mem_rd(EDN8_ADDR_CHR + MAILBOX_HOST(base), v, 1);
+    return rc == EDN8_OK ? CD_OK : rc;
+}
 
 int mailbox_wr_at(uint32_t ppu, const uint8_t *v, size_t n)
 {
     return edn8_mem_wr(EDN8_ADDR_CHR + MAILBOX_HOST(ppu), v, n);
-}
-
-int mailbox_status_wr(uint8_t v)
-{
-    return edn8_mem_wr(EDN8_ADDR_CHR + MAILBOX_STATUS_ADDR, &v, 1);
 }

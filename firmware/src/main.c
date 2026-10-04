@@ -487,7 +487,7 @@ static void do_push_run(void)
     if (!n8_ready()) return;
 
     int rc = n8push_open(true);
-    if (rc == CD_OK) rc = n8push_run();
+    if (rc == CD_OK) rc = n8push_run(MAILBOX_PPU);
     if (rc != CD_OK) {
         printf("  push: failed - %s", cd_strerror(rc));
         if (rc == EDN8_ESTATUS)  printf(" - status 0x%02X", edn8_last_status);
@@ -737,21 +737,19 @@ static void do_autoplay(const char *arg)
 
 // -- the game's mailbox ----------------------------------------------------
 //
-// $1FF8 is the game's request, $1FF9 the desired music track. Polled from the
-// same idle-loop slot as autoplay, so a poll can never land while core0 is
-// inside a cart operation.
+// One byte, the desired music track, at $1FF9 or where the disc says. Polled
+// from the same idle-loop slot as autoplay, so a poll can never land while
+// core0 is inside a cart operation, and never written by the host.
 
 #define GAME_POLL_MS 250u
 // A freshly booted ROM has to warm the PPU up and upload 8 KiB of tiles before
 // it owns the mailbox, so the first poll waits out that window.
 #define GAME_BOOT_POLL_MS 750u
 #define GAME_FAIL_WARN 8u            // 2 s of dead reads before it is worth saying
-#define MAILBOX_REQ_MAX 8u           // highest mailbox value read as a request
 #define BGM_TRACK_MAX 32u            // highest music byte read as a track request
 #define TRACK_START_MS 3000u         // first chunk of a track: a seek plus a read
 
 static bool game_on;
-static bool game_seen_zero;          // the game holds the screen; a 1 is a trigger
 static bool game_waiting;            // the "no cart link" line is already out
 static uint32_t game_read_fails;     // consecutive reads that told us nothing
 static absolute_time_t game_due;
@@ -797,16 +795,6 @@ static void set_booted(uint32_t crc)
 {
     booted_crc = crc;
     boot_keep.crc = crc;
-}
-
-// $1FFA is the host's answer to a $1FF8 request. This build serves no requests,
-// so the only answer it ever gives is MAILBOX_FAIL; the end-of-session 0 still
-// matters, since a stale byte would satisfy the next request.
-static void status_wr(uint8_t v)
-{
-    if (!edn8_is_open()) return;
-    int rc = mailbox_status_wr(v);
-    if (rc != EDN8_OK) printf("  status byte: %s\n", edn8_strerror(rc));
 }
 
 static uint32_t track_consumer_seq(void)
@@ -875,11 +863,11 @@ static bool game_poll(void)
     if (game_src == SRC_NONE) return false;
 
     // Off the menu the CHR at the mailbox is whatever was left there, and a
-    // stale byte would be read as a request from a game that is not running.
+    // stale byte would be read as a track from a game that is not running.
     if (cart_st != (int)EDN8_ST_GAME) return false;
 
-    uint8_t mb[2];
-    int rc = mailbox_rd(mb);
+    uint8_t mb;
+    int rc = mailbox_rd(&mb);
     if (rc != CD_OK) {
         if (++game_read_fails != GAME_FAIL_WARN) return false;
         printf("\ngame: mailbox unreadable - %s\n", cd_strerror(rc));
@@ -892,22 +880,10 @@ static bool game_poll(void)
     }
     game_read_fails = 0;
 
-    // A request is refused outright. Answering is what matters: a game left
-    // waiting on $1FFA spends its whole RDY_TIMEOUT, 600 fields, on a black
-    // screen before it gives up, where $FF puts it back in its room within a
-    // field or two.
-    if (mb[0] != 0 && mb[0] <= MAILBOX_REQ_MAX && game_seen_zero) {
-        game_seen_zero = false;
-        printf("\ngame: request %u - nothing in this build serves it\n", mb[0]);
-        status_wr(MAILBOX_FAIL);
-        return true;
-    }
-    if (mb[0] == 0 || mb[0] > MAILBOX_REQ_MAX) game_seen_zero = true;
-
     // The music byte is level-triggered: it IS the desired state, so nothing
     // needs a handshake. Bit 7 holds the track in place while the game pauses.
-    bool hold = (mb[1] & BGM_HOLD) != 0;
-    uint32_t want = mb[1] & ~BGM_HOLD;
+    bool hold = (mb & BGM_HOLD) != 0;
+    uint32_t want = mb & ~BGM_HOLD;
     if (want > BGM_TRACK_MAX) want = 0;
     if (want != bgm_refused) bgm_refused = 0;
     if (want != bgm_done) bgm_done = 0;
@@ -937,22 +913,22 @@ static bool game_poll(void)
     return true;
 }
 
-// Arming a game already running demands a 0 before the first trigger, so a
-// mailbox found high is not replayed; $1FFA starts clear for the same reason.
-//
-// `fresh` is a ROM this pass just booted: n8push seeds its mailbox to 0, so
-// anything nonzero there is real and demanding a 0 first would discard it. It
-// also has a tile upload to finish, hence the longer first poll.
+static uint32_t disc_mailbox(void)
+{
+    const cat_hdr_t *h = catalog_hdr();
+    return h && h->mailbox_ppu ? h->mailbox_ppu : MAILBOX_PPU;
+}
+
+// `fresh` is a ROM this pass just booted, with a tile upload to finish first.
 static void game_arm(game_src_t src, bool fresh)
 {
+    mailbox_at(disc_mailbox());
     game_src = src;
-    game_seen_zero = fresh;
     game_waiting = false;
     game_read_fails = 0;
     bgm_refused = bgm_done = 0;
     game_due = make_timeout_time_ms(fresh ? GAME_BOOT_POLL_MS : GAME_POLL_MS);
     game_on = true;
-    status_wr(0);
 }
 
 static void game_disarm(void)
@@ -960,14 +936,15 @@ static void game_disarm(void)
     game_on = false;
     bgm_forget();                            // nothing would ever stop it otherwise
     if (disctask_busy()) disctask_stop(35000);
-    status_wr(0);
+    mailbox_at(MAILBOX_PPU);
 }
 
 static void game_report(void)
 {
     if (!game_on) { printf("  game trigger: off\n"); return; }
     if (game_src == SRC_DISC && catalog_is_open())
-        printf("  game trigger: armed, disc \"%s\"\n", catalog_hdr()->title);
+        printf("  game trigger: armed, disc \"%s\", music byte at PPU $%04lX\n",
+               catalog_hdr()->title, (unsigned long)mailbox_where());
     else
         printf("  game trigger: armed, no source (disc removed)\n");
 }
@@ -1016,7 +993,7 @@ static int game_boot(const cat_item_t *rom)
     int rc = catalog_stage_rom(rom, dst, ROM_STAGE_BYTES, &len);
     if (rc != CD_OK) return rc;
     if ((rc = n8push_open_at(dst, len, true)) != CD_OK) return rc;
-    return n8push_run();
+    return n8push_run(disc_mailbox());
 }
 
 // Boot the disc's ROM on a cart showing its menu, and arm the mailbox.
@@ -1080,7 +1057,7 @@ extern const uint8_t cdplayer_n8p[], cdplayer_n8p_end[];
 static bool player_launch(void)
 {
     int rc = n8push_open_at(cdplayer_n8p, (size_t)(cdplayer_n8p_end - cdplayer_n8p), true);
-    if (rc == CD_OK) rc = n8push_run();
+    if (rc == CD_OK) rc = n8push_run(MAILBOX_PPU);
     if (rc != CD_OK) {
         printf("player: load failed - %s\n", cd_strerror(rc));
         return false;
@@ -1307,6 +1284,7 @@ static void do_catalog_info(const char *arg)
     const cat_hdr_t *h = catalog_hdr();
     printf("  game disc: \"%s\", v%lu, %lu items\n", h->title,
            (unsigned long)h->version, (unsigned long)h->nitems);
+    if (h->mailbox_ppu) printf("  music byte at PPU $%04lX\n", (unsigned long)h->mailbox_ppu);
     printf("  %-6s %3s %8s %8s  %s\n", "type", "id", "lba", "sectors", "crc32");
     for (uint32_t i = 0; i < h->nitems; i++) {
         const cat_item_t *it = &h->item[i];

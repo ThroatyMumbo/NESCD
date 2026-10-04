@@ -23,6 +23,7 @@
 #define PLAYER_MAGIC_PPU  0x1FF0u
 #define PLAYER_LEN_PPU    0x1FF4u
 #define PLAYER_REQ_PPU    0x1FF8u
+#define PLAYER_ANS_PPU    0x1FFAu
 #define PLAYER_STAT_PPU   0x1FFBu
 #define PLAYER_ANS_FAIL   0x80u
 

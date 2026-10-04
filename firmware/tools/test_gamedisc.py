@@ -46,7 +46,9 @@ def check_image(img):
         check(False, f"catalog: {e}")
         return failed
     check(True, f"catalog: {hdr['title']!r}, {hdr['nitems']} items")
-    check(hdr["reserved"] == (0, 0, 0, 0), "header reserved words are zero")
+    check(hdr["reserved"] == (0, 0, 0), "header reserved words are zero")
+    if hdr["mailbox_ppu"]:
+        check(True, f"music byte at PPU ${hdr['mailbox_ppu']:04X}")
     check(not any(img[HDR_LEN + hdr["nitems"] * ITEM_LEN:SECTOR]),
           "unused table entries and the rest of sector 0 are zero")
     check(not any(img[SECTOR:FIRST_LBA * SECTOR]),

@@ -14,6 +14,7 @@
 #include <string.h>
 
 #include "edn8.h"
+#include "mailbox.h"
 #include "n8push.h"
 
 // -- edn8 stub -------------------------------------------------------------
@@ -199,15 +200,22 @@ int main(int argc, char **argv)
 
     reset_log();
     fail_at_write = -1;
-    check(n8push_run() == CD_OK, "runs to completion");
+    check(n8push_run(MAILBOX_PPU) == CD_OK, "runs to completion");
     check(strncmp(log_buf, "menu_test\n", 10) == 0, "the menu is tested first");
     check(strstr(log_buf, "install ") != NULL, "installs the boot target");
     check(strstr(log_buf, "start\n") > strstr(log_buf, "install "), "starts after installing");
-    check(strstr(log_buf, "mem_wr 00C01FF8 4\n") > strstr(log_buf, "install "),
+    check(strstr(log_buf, "mem_wr 00C01FF9 1\n") > strstr(log_buf, "install "),
           "seeds the mailbox between install and start");
     check(strstr(log_buf, "start\n") > strstr(log_buf, "mem_wr "),
           "  ...before the game can run");
     check(strstr(log_buf, "open ") < strstr(log_buf, "install "), "every file precedes the install");
+    reset_log();
+    check(n8push_run(0x1300u) == CD_OK, "runs with a relocated mailbox");
+    check(strstr(log_buf, "mem_wr 00C01300 1\n") != NULL &&
+          strstr(log_buf, "mem_wr 00C01FF9") == NULL, "  ...and seeds it there, not at $1FF9");
+
+    reset_log();
+    check(n8push_run(MAILBOX_PPU) == CD_OK, "runs again at the default");
     check(strstr(log_buf, "open " N8PUSH_ROOT) != NULL &&
           strstr(log_buf, "install " N8PUSH_ROOT) != NULL, "files and install land under the root");
     {
@@ -222,13 +230,13 @@ int main(int argc, char **argv)
 
     reset_log();
     menu_up = 0;
-    check(n8push_run() == CD_EMENU, "refuses when the menu is gone");
+    check(n8push_run(MAILBOX_PPU) == CD_EMENU,"refuses when the menu is gone");
     check(strstr(log_buf, "open ") == NULL, "  ...without spending a file on it");
     menu_up = 1;
 
     reset_log();
     fail_at_write = 0;
-    check(n8push_run() == EDN8_ETIMEOUT, "propagates a write failure");
+    check(n8push_run(MAILBOX_PPU) == EDN8_ETIMEOUT,"propagates a write failure");
     check(strstr(log_buf, "close\n") != NULL, "  ...and still closes the file");
     check(strstr(log_buf, "install ") == NULL, "  ...and does not install");
     fail_at_write = -1;

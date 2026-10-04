@@ -54,6 +54,6 @@ const uint8_t *n8push_data(const n8push_file_t *f);
 
 // Push every staged file, then install and start hdr->boot if it is set.
 // Prints its own progress; needs an open cart link.
-int n8push_run(void);
+int n8push_run(uint32_t mailbox_ppu);
 
 #endif

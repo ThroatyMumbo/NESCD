@@ -17,6 +17,7 @@
 #define GAME_ITEMS_MAX    32u
 #define GAME_ITEM_LBA_MIN 16u
 #define GAME_TITLE        32u
+#define GAME_MAILBOX_MAX  0x1FFFu
 
 // Item types. Type 2 is reserved for items this build does not serve; they are
 // listed and refused, never treated as a malformed catalog.
@@ -37,7 +38,8 @@ typedef struct {
     uint32_t version;
     char     title[GAME_TITLE];      // NUL-terminated
     uint32_t nitems;
-    uint32_t reserved[4];
+    uint32_t mailbox_ppu;
+    uint32_t reserved[3];
     cat_item_t item[GAME_ITEMS_MAX];
 } cat_hdr_t;
 

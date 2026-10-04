@@ -27,6 +27,7 @@ int catalog_check(const cat_hdr_t *h)
     if (h->version != GAME_VER) return CD_EVERSION;
     if (h->nitems == 0 || h->nitems > GAME_ITEMS_MAX) return CD_EGAMEFMT;
     if (!memchr(h->title, 0, GAME_TITLE)) return CD_EGAMEFMT;
+    if (h->mailbox_ppu > GAME_MAILBOX_MAX) return CD_EGAMEFMT;
 
     uint32_t roms = 0, end = GAME_ITEM_LBA_MIN;
     for (uint32_t i = 0; i < h->nitems; i++) {

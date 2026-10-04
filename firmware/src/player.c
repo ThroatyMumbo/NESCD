@@ -255,6 +255,8 @@ void player_media(int st, bool shut_empty)
 
 // -- the mailbox --------------------------------------------------------------------
 
+static void answer(uint8_t v) { mailbox_wr_at(PLAYER_ANS_PPU, &v, 1); }
+
 bool player_magic_ok(void)
 {
     uint8_t m[4];
@@ -305,7 +307,7 @@ void player_arm(bool fresh)
     viz_lit = true;
     magic_miss = read_fails = ticks = 0;
     due = make_timeout_time_ms(fresh ? BOOT_POLL_MS : POLL_MS);
-    if (edn8_is_open()) mailbox_status_wr(0);
+    if (edn8_is_open()) answer(0);
     if (cdda_is_open() && state == PL_STOPPED) {
         int rc = start_at(track);
         if (rc != CD_OK) printf("player: %s\n", cd_strerror(rc));
@@ -317,7 +319,7 @@ void player_disarm(void)
     if (!armed) return;
     armed = false;
     do_stop();
-    if (edn8_is_open()) mailbox_status_wr(0);
+    if (edn8_is_open()) answer(0);
 }
 
 bool player_armed(void) { return armed; }
@@ -356,7 +358,7 @@ bool player_poll(void)
     }
 
     uint8_t mb[2];
-    int rc = mailbox_rd(mb);
+    int rc = mailbox_rd_at(PLAYER_REQ_PPU, mb, 2);
     if (rc != CD_OK) {
         if (++read_fails != FAIL_WARN) return printed;
         printf("\nplayer: mailbox unreadable - %s\n", cd_strerror(rc));
@@ -378,7 +380,7 @@ bool player_poll(void)
             rc = command(cmd, mb[1]);
             if (rc != CD_OK) printf(" - %s", cd_strerror(rc));
             printf("\n");
-            mailbox_status_wr(rc == CD_OK ? mb[0] : (uint8_t)(mb[0] | PLAYER_ANS_FAIL));
+            answer(rc == CD_OK ? mb[0] : (uint8_t)(mb[0] | PLAYER_ANS_FAIL));
             printed = true;
         }
     }

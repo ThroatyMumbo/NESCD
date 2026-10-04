@@ -19,6 +19,7 @@
 #include "cdcore.h"
 #include "disc.h"
 #include "edn8.h"
+#include "mailbox.h"
 #include "n8push.h"
 #include "track.h"
 
@@ -129,10 +130,14 @@ static void catalog_rules(void)
     check(catalog_check(&c) == CD_EGAMEFMT, "catalog: unknown type refused");
     c = *h; memset(c.title, 'T', GAME_TITLE);
     check(catalog_check(&c) == CD_EGAMEFMT, "catalog: unterminated title refused");
+    c = *h; c.mailbox_ppu = GAME_MAILBOX_MAX + 1u;
+    check(catalog_check(&c) == CD_EGAMEFMT, "catalog: mailbox past the pattern tables refused");
+    c = *h; c.mailbox_ppu = 0x1300u;
+    check(catalog_check(&c) == CD_OK, "catalog: a relocated mailbox accepted");
     check(catalog_check(h) == CD_OK, "catalog: the disc's own passes");
 
-    // A disc carrying reserved items still has to open: they are listed and
-    // refused at the mailbox, never treated as a broken catalog.
+    // A disc carrying reserved items still has to open: they are listed,
+    // never treated as a broken catalog.
     if (h->nitems > 2) {
         c = *h;
         c.item[1].type = c.item[2].type = ITEM_RESERVED;
@@ -157,7 +162,7 @@ static void rom_checks(const cat_item_t *it)
         const n8push_hdr_t *h = n8push_hdr();
         check(h->boot[0] != 0, "rom: names a boot target");
         log_buf[0] = 0;
-        rc = n8push_run();
+        rc = n8push_run(MAILBOX_PPU);
         check(rc == CD_OK, "rom: n8push_run over the staged bytes");
         check(strncmp(log_buf, "menu_test ", 10) == 0, "rom: the menu is tested before any file");
         check(strstr(log_buf, "install seed start") != NULL,
