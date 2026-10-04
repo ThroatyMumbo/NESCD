@@ -476,8 +476,9 @@ static void do_push_info(void)
            N8PUSH_BASE, (unsigned long)h->nfiles,
            (unsigned long)(h->payload_bytes >> 10), (unsigned long)h->crc32);
     for (uint32_t i = 0; i < h->nfiles; i++)
-        printf("    %-32s %lu B\n", h->file[i].path, (unsigned long)h->file[i].len);
-    if (h->boot[0]) printf("  boot:     %s\n", h->boot);
+        printf("    %s%-32s %lu B\n", N8PUSH_ROOT, h->file[i].path,
+               (unsigned long)h->file[i].len);
+    if (h->boot[0]) printf("  boot:     %s%s\n", N8PUSH_ROOT, h->boot);
     else            printf("  boot:     none - push only\n");
 }
 
@@ -1351,8 +1352,9 @@ static void do_game_load(const char *arg)
                (unsigned long)h->nfiles, (unsigned long)(h->payload_bytes >> 10),
                (unsigned long)h->crc32);
         for (uint32_t i = 0; i < h->nfiles; i++)
-            printf("    %-32s %lu B\n", h->file[i].path, (unsigned long)h->file[i].len);
-        printf("  boot:     %s\n", h->boot[0] ? h->boot : "none");
+            printf("    %s%-32s %lu B\n", N8PUSH_ROOT, h->file[i].path,
+                   (unsigned long)h->file[i].len);
+        printf("  boot:     %s%s\n", h->boot[0] ? N8PUSH_ROOT : "", h->boot[0] ? h->boot : "none");
         return;
     }
     if (!n8_ready()) return;

@@ -22,6 +22,7 @@
 #define N8PUSH_VERSION 1u
 #define N8PUSH_MAXFILE 8u
 #define N8PUSH_PATH    64u
+#define N8PUSH_ROOT    "NESCD/"
 
 // Little-endian and naturally aligned: the image is used in place, so this is a
 // cast, not a parse.

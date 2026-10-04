@@ -176,6 +176,21 @@ int main(int argc, char **argv)
     bad[100 + 8] = '/';
     check(n8push_open_at(bad, (size_t)n, false) == CD_ESHAPE, "absolute path");
 
+    static const char *const escapes[] = { "..", "../x.nes", "a/../../x.nes", "a/..",
+                                           "0:/x.nes", "a\\..\\x.nes" };
+    for (size_t i = 0; i < sizeof(escapes) / sizeof(escapes[0]); i++) {
+        memcpy(bad, img, (size_t)n);
+        memset(bad + 100 + 8, 0, N8PUSH_PATH);
+        strcpy((char *)bad + 100 + 8, escapes[i]);
+        char what[64];
+        snprintf(what, sizeof(what), "escapes the root: %s", escapes[i]);
+        check(n8push_open_at(bad, (size_t)n, false) == CD_ESHAPE, what);
+    }
+    memcpy(bad, img, (size_t)n);
+    memset(bad + 100 + 8, 0, N8PUSH_PATH);
+    strcpy((char *)bad + 100 + 8, "a/..b/.c..");
+    check(n8push_open_at(bad, (size_t)n, false) == CD_OK, "dots inside a name are fine");
+
     check(n8push_open_at(img, sizeof(n8push_hdr_t) - 1, false) == CD_ESHAPE,
           "window smaller than the header");
 
@@ -193,6 +208,17 @@ int main(int argc, char **argv)
     check(strstr(log_buf, "start\n") > strstr(log_buf, "mem_wr "),
           "  ...before the game can run");
     check(strstr(log_buf, "open ") < strstr(log_buf, "install "), "every file precedes the install");
+    check(strstr(log_buf, "open " N8PUSH_ROOT) != NULL &&
+          strstr(log_buf, "install " N8PUSH_ROOT) != NULL, "files and install land under the root");
+    {
+        const char *o = log_buf;
+        int stray = 0;
+        while ((o = strstr(o, "open ")) != NULL) {
+            o += 5;
+            stray |= strncmp(o, N8PUSH_ROOT, strlen(N8PUSH_ROOT)) != 0;
+        }
+        check(!stray, "  ...every open, none outside it");
+    }
 
     reset_log();
     menu_up = 0;

@@ -17,10 +17,21 @@ static const n8push_hdr_t *hdr;
 
 static bool path_ok(const char *p, size_t n)
 {
-    if (p[0] == 0 || p[0] == '/') return false;
-    for (size_t i = 0; i < n; i++)
-        if (p[i] == 0) return true;
-    return false;                   // never terminated inside its field
+    const char *end = memchr(p, 0, n);
+    if (!end || end == p || p[0] == '/') return false;
+    for (const char *s = p; s < end; s++) {
+        if (*s == ':' || *s == '\\') return false;
+        if (s[0] == '.' && s[1] == '.' && (s == p || s[-1] == '/') &&
+            (s[2] == '/' || s + 2 == end))
+            return false;
+    }
+    return true;
+}
+
+static const char *rooted(char buf[sizeof(N8PUSH_ROOT) + N8PUSH_PATH], const char *p)
+{
+    strcpy(buf, N8PUSH_ROOT);
+    return strcat(buf, p);
 }
 
 int n8push_open_at(const void *b, size_t limit, bool check_crc)
@@ -68,9 +79,11 @@ const uint8_t *n8push_data(const n8push_file_t *f)
 
 static int put_file(const n8push_file_t *f)
 {
-    int rc = edn8_make_path(f->path);
+    char buf[sizeof(N8PUSH_ROOT) + N8PUSH_PATH];
+    const char *path = rooted(buf, f->path);
+    int rc = edn8_make_path(path);
     if (rc != EDN8_OK) return rc;
-    if ((rc = edn8_file_open(f->path, EDN8_FA_WRITE | EDN8_FA_CREATE_ALWAYS)) != EDN8_OK)
+    if ((rc = edn8_file_open(path, EDN8_FA_WRITE | EDN8_FA_CREATE_ALWAYS)) != EDN8_OK)
         return rc;
 
     const uint8_t *p = n8push_data(f);
@@ -96,17 +109,19 @@ int n8push_run(void)
 
     for (uint32_t i = 0; i < hdr->nfiles; i++) {
         const n8push_file_t *f = &hdr->file[i];
-        printf("  %s  %lu B\n", f->path, (unsigned long)f->len);
+        printf("  %s%s  %lu B\n", N8PUSH_ROOT, f->path, (unsigned long)f->len);
         int rc = put_file(f);
         if (rc != EDN8_OK) return rc;
     }
 
     if (!hdr->boot[0]) return CD_OK;
 
+    char buf[sizeof(N8PUSH_ROOT) + N8PUSH_PATH];
+    const char *boot = rooted(buf, hdr->boot);
     uint16_t idx = 0;
-    int rc = edn8_menu_install(hdr->boot, &idx);
+    int rc = edn8_menu_install(boot, &idx);
     if (rc != EDN8_OK) return rc;
-    printf("  installed %s, mapper index %u\n", hdr->boot, idx);
+    printf("  installed %s, mapper index %u\n", boot, idx);
 
     // CHR RAM comes up undefined and the ROM does not clear the mailbox until
     // it has run its own tile upload, so seed it here: the first poll lands
