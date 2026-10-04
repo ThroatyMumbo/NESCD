@@ -16,6 +16,7 @@
 #include "cdda.h"
 #include "disc.h"
 #include "track.h"
+#include "viz.h"
 
 // Samples from the end at which a non-looping track starts its ramp out, so
 // the content's last sample never lands as a DC step.
@@ -87,6 +88,7 @@ static void __not_in_flash_func(bgm_fill)(uint32_t *out, uint n)
             cur.amp += AUDIO_FADE_STEP;
             if (cur.amp > 0xFFFFu) cur.amp = 0xFFFFu;
         }
+        viz_tap(l, r);
         // The high half-word is the right slot (audio_i2s.pio).
         out[i] = ((uint32_t)(uint16_t)(int16_t)r << 16) | (uint16_t)(int16_t)l;
         cur.ab.off++;

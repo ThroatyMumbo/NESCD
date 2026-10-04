@@ -1,11 +1,12 @@
 // player.h - the audio CD player: a ROM the user starts on the cart drives the
 // transport through the mailbox page, and the host streams a Red Book disc to
-// the DAC. Byte roles in sprite tile $FF, $1FF0..$1FFF:
+// the DAC. Byte roles in sprite tiles $FE..$FF:
 //
+//   $1FE8..F  host  spectrum bars, low band first, 0..255 (viz.h)
 //   $1FF0..3  ROM   "NCDP", rewritten every frame; the host arms on it
 //   $1FF4..5  host  current track length, min / sec
 //   $1FF8     ROM   request (seq << 4) | cmd, seq 1..7 rolling; 0 = none
-//   $1FF9     ROM   PLAY's track, 0 = the current one
+//   $1FF9     ROM   PLAY's track, 0 = the current one; SEEK's signed seconds
 //   $1FFA     host  the request echoed once acted on, | 0x80 refused
 //   $1FFB     host  state, $1FFC track, $1FFD track count, $1FFE/F min / sec
 //
@@ -18,13 +19,15 @@
 #include <stdint.h>
 
 #define PLAYER_MAGIC      "NCDP"
+#define PLAYER_VIZ_PPU    0x1FE8u
 #define PLAYER_MAGIC_PPU  0x1FF0u
 #define PLAYER_LEN_PPU    0x1FF4u
 #define PLAYER_REQ_PPU    0x1FF8u
 #define PLAYER_STAT_PPU   0x1FFBu
 #define PLAYER_ANS_FAIL   0x80u
 
-enum { PLC_PLAY = 1, PLC_PAUSE, PLC_STOP, PLC_NEXT, PLC_PREV, PLC_EJECT, PLC_LOAD };
+enum { PLC_PLAY = 1, PLC_PAUSE, PLC_STOP, PLC_NEXT, PLC_PREV, PLC_EJECT, PLC_LOAD,
+       PLC_SEEK };
 
 typedef enum {
     PL_NO_DISC, PL_TRAY_OPEN, PL_LOADING, PL_STOPPED, PL_PLAYING, PL_PAUSED,

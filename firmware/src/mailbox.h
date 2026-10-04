@@ -20,7 +20,7 @@
 #define MAILBOX_FAIL 0xFFu
 
 // The 16 bytes of sprite tile $FF, $1FF0..$1FFF, are the whole page; the CD
-// player ROM uses the rest of it (player.h).
+// player ROM uses the rest of it, and the end of tile $FE too (player.h).
 #define MAILBOX_PAGE        0x401FF0u
 #define MAILBOX_HOST(ppu)   (0x400000u + (uint32_t)(ppu))
 

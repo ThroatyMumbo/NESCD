@@ -16,6 +16,7 @@
 #include "mailbox.h"
 #include "player.h"
 #include "usb_link.h"
+#include "viz.h"
 
 #define POLL_MS       250u
 #define BOOT_POLL_MS  750u           // a fresh ROM is still uploading its tiles
@@ -24,6 +25,7 @@
 #define FAIL_WARN     8u
 #define START_MS      5000u          // first chunk after a cold seek
 #define STOP_MS       35000u
+#define VIZ_MS        33u            // the ROM smooths at 60 Hz between updates
 
 static bool armed;
 static player_state_t state;
@@ -34,6 +36,8 @@ static bool req_valid;
 static uint8_t req_last, magic_miss, read_fails, ticks;
 static uint8_t shown[5], shown_len[2];
 static bool shown_valid;
+static absolute_time_t viz_due;
+static bool viz_lit;                 // the page holds bars that are not all 0
 
 static const char *const state_name[] = {
     "no disc", "tray open", "loading", "stopped", "playing", "paused", "not an audio cd",
@@ -59,12 +63,8 @@ static bool cdda_running(void)
     return disctask_busy() && disctask_job() == &cdda_job && !cdda_medium_gone();
 }
 
-static int start_at(uint8_t t)
+static int start_lba(uint8_t t, uint32_t at)
 {
-    const cdda_toc_t *toc = cdda_toc();
-    if (!toc || !cdda_is_audio(t)) return CD_ENOAUDIO;
-    uint32_t at = toc->start[t];
-
     bool reuse = cdda_running() && cdda_slots_hold(cdda_next_seq(), at, disc_slot_count());
     bgm_stop();
     play_start = at;
@@ -92,6 +92,32 @@ static int start_at(uint8_t t)
     track = t;
     set_state(PL_PLAYING);
     return CD_OK;
+}
+
+static int start_at(uint8_t t)
+{
+    const cdda_toc_t *toc = cdda_toc();
+    if (!toc || !cdda_is_audio(t)) return CD_ENOAUDIO;
+    return start_lba(t, toc->start[t]);
+}
+
+// Relative, inside the current track; a paused player stays paused.
+static int do_seek(int8_t sec)
+{
+    const cdda_toc_t *toc = cdda_toc();
+    if (!toc || (state != PL_PLAYING && state != PL_PAUSED) || !bgm_active())
+        return CD_ENOAUDIO;
+    uint8_t t = cur_track();
+    if (!cdda_is_audio(t)) return CD_ENOAUDIO;
+    int32_t lo = (int32_t)toc->start[t];
+    int32_t hi = lo + (int32_t)cdda_track_len(t) - 75;
+    int32_t at = (int32_t)bgm_cursor() + (int32_t)sec * 75;
+    if (at > hi) at = hi;
+    if (at < lo) at = lo;
+    bool paused = state == PL_PAUSED;
+    int rc = start_lba(t, (uint32_t)at);
+    if (rc == CD_OK && paused) { bgm_hold(true); set_state(PL_PAUSED); }
+    return rc;
 }
 
 static int do_stop(void)
@@ -176,14 +202,16 @@ static int command(uint8_t cmd, uint8_t param)
     case PLC_PREV:  return do_step(-1);
     case PLC_EJECT: return do_eject();
     case PLC_LOAD:  return do_load();
+    case PLC_SEEK:  return do_seek((int8_t)param);
     default:        return CD_ENOITEM;
     }
 }
 
 static const char *cmd_name(uint8_t cmd)
 {
-    static const char *const n[] = { "?", "play", "pause", "stop", "next", "prev", "eject", "load" };
-    return cmd <= PLC_LOAD ? n[cmd] : "?";
+    static const char *const n[] = { "?", "play", "pause", "stop", "next", "prev", "eject", "load",
+                                     "seek" };
+    return cmd <= PLC_SEEK ? n[cmd] : "?";
 }
 
 // -- media edges ---------------------------------------------------------------------
@@ -257,11 +285,24 @@ static void push_status(void)
     shown_valid = true;
 }
 
+// Waits for the first status push, which is past a fresh ROM's tile upload.
+static void push_viz(void)
+{
+    if (!shown_valid || !time_reached(viz_due) || !edn8_is_open()) return;
+    viz_due = make_timeout_time_ms(VIZ_MS);
+    bool live = state == PL_PLAYING && bgm_active();
+    if (!live && !viz_lit) return;
+    uint8_t v[VIZ_BANDS] = { 0 };
+    if (live) viz_bands(v);
+    if (mailbox_wr_at(PLAYER_VIZ_PPU, v, VIZ_BANDS) == EDN8_OK) viz_lit = live;
+}
+
 void player_arm(bool fresh)
 {
     armed = true;
     req_valid = false;
     shown_valid = false;
+    viz_lit = true;
     magic_miss = read_fails = ticks = 0;
     due = make_timeout_time_ms(fresh ? BOOT_POLL_MS : POLL_MS);
     if (edn8_is_open()) mailbox_status_wr(0);
@@ -294,6 +335,7 @@ bool player_poll(void)
     // Stopped from outside (bare B, M): the state follows the DAC.
     if ((state == PL_PLAYING || state == PL_PAUSED) && !bgm_active())
         set_state(PL_STOPPED);
+    if (armed) push_viz();
     if (!armed || !time_reached(due)) return printed;
     due = make_timeout_time_ms(POLL_MS);
     if (!edn8_is_open()) return printed;
@@ -332,6 +374,7 @@ bool player_poll(void)
             uint8_t cmd = mb[0] & 0x0Fu;
             printf("\nplayer: %s", cmd_name(cmd));
             if (cmd == PLC_PLAY && mb[1]) printf(" %u", mb[1]);
+            if (cmd == PLC_SEEK) printf(" %+d s", (int8_t)mb[1]);
             rc = command(cmd, mb[1]);
             if (rc != CD_OK) printf(" - %s", cd_strerror(rc));
             printf("\n");
@@ -399,8 +442,13 @@ void player_console(const char *arg)
     case 'v': rc = do_step(-1); break;
     case 'e': rc = do_eject(); break;
     case 'l': rc = do_load(); break;
+    case 'k': {
+        long sec = strtol(arg + 1, NULL, 10);
+        rc = do_seek((int8_t)(sec > 127 ? 127 : sec < -128 ? -128 : sec));
+        break;
+    }
     default:
-        printf("  usage: C [t | p [track] | h | s | n | v | e | l]\n");
+        printf("  usage: C [t | p [track] | h | s | n | v | e | l | k <+-sec>]\n");
         return;
     }
     if (rc != CD_OK) printf("  player: %s\n", cd_strerror(rc));

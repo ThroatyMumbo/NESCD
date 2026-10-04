@@ -17,10 +17,10 @@ TITLE  ?= NESCD DEMO
 all: $(IMG) $(PLAYER)
 
 # The audio CD player: no disc image, the ROM goes on the cart by hand.
-$(PLAYER): cdplayer.s gen_font.py gen_tiles.py game.cfg mkrom.py Makefile
+$(PLAYER): cdplayer.s gen_gfx.py gen_font.py gen_tiles.py game.cfg mkrom.py Makefile
 	@mkdir -p $(BUILD)
-	$(PY) gen_font.py $(BUILD)/font.chr
-	$(CA65) cdplayer.s -g --bin-include-dir $(BUILD) \
+	$(PY) gen_gfx.py $(BUILD)
+	$(CA65) cdplayer.s -g -I $(BUILD) --bin-include-dir $(BUILD) \
 		-l $(BUILD)/cdplayer.lst -o $(BUILD)/cdplayer.o
 	$(LD65) -C game.cfg $(BUILD)/cdplayer.o -m $(BUILD)/cdplayer.map \
 		-Ln $(BUILD)/cdplayer.sym -o $(BUILD)/cdplayer.bin

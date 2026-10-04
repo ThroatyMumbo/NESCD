@@ -1,11 +1,5 @@
-#!/usr/bin/env python3
-# The CD player's CHR: a text font at tile id == ASCII for $20..$5F, so a
-# string's bytes are its tiles, plus transport marks at $10..$12.
-import sys
-
-from gen_tiles import BANK, tile
-
-KEY = {".": 0, "1": 1}
+# The CD player's 6x7 text font, one 8-row picture per character; gen_gfx.py
+# turns it into tiles at id == ASCII.
 
 GLYPHS = {
     " ": ["........"] * 8,
@@ -55,26 +49,13 @@ GLYPHS = {
     "Z": ["111111..", ".....1..", "....1...", "...1....", "..1.....", ".1......", "111111..", "........"],
 }
 
-# $10 play, $11 pause, $12 stop.
+# State marks for the display, tiles $10..$15: play, pause, stop, eject,
+# loading, no disc.
 MARKS = [
     ["1.......", "11......", "111.....", "1111....", "111.....", "11......", "1.......", "........"],
     ["11..11..", "11..11..", "11..11..", "11..11..", "11..11..", "11..11..", "11..11..", "........"],
-    ["111111..", "111111..", "111111..", "111111..", "111111..", "111111..", "111111..", "........"],
+    ["........", "111111..", "111111..", "111111..", "111111..", "111111..", "111111..", "........"],
+    ["...1....", "..111...", ".11111..", "1111111.", "........", "1111111.", "1111111.", "........"],
+    ["111111..", ".1..1...", "..11....", "...1....", "..11....", ".1..1...", "111111..", "........"],
+    [".1111...", "1....1..", "1...11..", "1..1.1..", "1.1..1..", "11...1..", ".1111...", "........"],
 ]
-
-
-def main():
-    out = sys.argv[1]
-    bank = bytearray(BANK)
-    for i, art in enumerate(MARKS):
-        bank[(0x10 + i) * 16:(0x11 + i) * 16] = tile(art, KEY)
-    for code in range(0x20, 0x60):
-        art = GLYPHS.get(chr(code))
-        if art:
-            bank[code * 16:(code + 1) * 16] = tile(art, KEY)
-    open(out, "wb").write(bank)
-    print(f"{out}: {BANK} bytes")
-
-
-if __name__ == "__main__":
-    main()

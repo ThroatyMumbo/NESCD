@@ -44,6 +44,7 @@ add_executable(nescd
     src/tone.c
     src/track.c
     src/usb_link.c
+    src/viz.c
 )
 pico_generate_pio_header(nescd ${CMAKE_CURRENT_LIST_DIR}/src/ata.pio)
 pico_generate_pio_header(nescd ${CMAKE_CURRENT_LIST_DIR}/src/audio_i2s.pio)
