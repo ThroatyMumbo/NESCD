@@ -24,6 +24,7 @@ typedef struct {
     uint8_t  num_cfg;
     uint16_t bulk_in_mps, bulk_out_mps;
     uint32_t attach_count, remove_count;
+    uint32_t recover_count;    // host-stack restarts by the stuck-link watchdog
     char     mfr[USB_LINK_STR_MAX];
     char     product[USB_LINK_STR_MAX];
     char     serial[USB_LINK_STR_MAX];

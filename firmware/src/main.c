@@ -344,8 +344,9 @@ static void do_usb_state(void)
            bus_speed == 2 ? "FS " : bus_speed == 1 ? "LS " : "no device ",
            (sie & USB_SIE_STATUS_VBUS_DETECTED_BITS) ? "VBUS " : "",
            (sie & USB_SIE_STATUS_CONNECTED_BITS) ? "CONN-latch" : "");
-    printf("  events:   %lu attach, %lu remove\n",
-           (unsigned long)s->attach_count, (unsigned long)s->remove_count);
+    printf("  events:   %lu attach, %lu remove, %lu watchdog restart\n",
+           (unsigned long)s->attach_count, (unsigned long)s->remove_count,
+           (unsigned long)s->recover_count);
     if (s->attach_count == 0) { printf("  device:   none\n"); return; }
 
     printf("  device:   addr %u, %04X:%04X, %s-speed\n",

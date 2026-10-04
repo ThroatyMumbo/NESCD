@@ -128,8 +128,8 @@ static void __tusb_irq_path_func(hw_xfer_complete)(struct hw_endpoint *ep, xfer_
 static void __tusb_irq_path_func(_handle_buff_status_bit)(uint bit, struct hw_endpoint *ep)
 {
   usb_hw_clear->buf_status = bit;
-  // EP may have been stalled?
-  assert(ep->active);
+  // A control transfer failed on RX timeout can still post one late buffer.
+  if ( !ep->active ) return;
   bool done = hw_endpoint_xfer_continue(ep);
   if ( done )
   {
@@ -197,7 +197,7 @@ static void __tusb_irq_path_func(hw_trans_complete)(void)
   {
     pico_trace("Sent setup packet\n");
     struct hw_endpoint *ep = &epx;
-    assert(ep->active);
+    if ( !ep->active ) return;
     // Set transferred length to 8 for a setup packet
     ep->xferred_len = 8;
     hw_xfer_complete(ep, XFER_RESULT_SUCCESS);
@@ -262,6 +262,15 @@ static void __tusb_irq_path_func(hcd_rp2040_irq)(void)
   {
     handled |= USB_INTS_ERROR_RX_TIMEOUT_BITS;
     usb_hw_clear->sie_status = USB_SIE_STATUS_RX_TIMEOUT_BITS;
+
+    // EPX_BULK: fail a timed-out control transfer, as upstream does; TinyUSB has
+    // no control timeout, so left alone it waits forever. Bulk OUT is untouched.
+    if ( epx.active && tu_edpt_number(epx.ep_addr) == 0 )
+    {
+      usb_hw->sie_ctrl = SIE_CTRL_BASE | USB_SIE_CTRL_STOP_TRANS_BITS;
+      *epx.buffer_control = 0;
+      hw_xfer_complete(&epx, XFER_RESULT_FAILED);
+    }
   }
 
   if ( status & USB_INTS_ERROR_DATA_SEQ_BITS )
@@ -421,6 +430,9 @@ bool hcd_init(uint8_t rhport, const tusb_rhport_init_t* rh_init) {
 
   // clear epx and interrupt eps
   memset(&ep_pool, 0, sizeof(ep_pool));
+  // EPX_BULK: a re-init after tuh_deinit() must not inherit the old pipe.
+  memset(&epx_bulk, 0, sizeof(epx_bulk));
+  epx_ctrl_mps = 64;
 
   // Enable in host mode with SOF / Keep alive on
   usb_hw->main_ctrl = USB_MAIN_CTRL_CONTROLLER_EN_BITS | USB_MAIN_CTRL_HOST_NDEVICE_BITS;
