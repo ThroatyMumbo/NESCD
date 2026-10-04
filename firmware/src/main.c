@@ -767,7 +767,20 @@ static uint32_t booted_crc;          // the ROM item pushed this cart session
 #define CART_POLL_MS 1000u
 #define CART_OPEN_RETRY_MS 5000u
 static absolute_time_t cart_due;
-static int  cart_st = -1;            // last edn8_status(), -1 unknown
+static int  cart_st = -1;            // last cart_status(), -1 unknown
+
+#define CART_ST_OFF   0xFEu
+#define CART_PROBE_MS 250u
+
+static int cart_status(uint8_t *st)
+{
+    int rc = edn8_status(st);
+    if (rc != EDN8_OK) return rc;
+    if (*st & EDN8_ST_FPG_OK) { *st = EDN8_ST_GAME; return rc; }
+    edn8_sysinfo_t si;
+    if (*st == EDN8_ST_MENU && edn8_sys_info_ms(&si, CART_PROBE_MS) != EDN8_OK) *st = CART_ST_OFF;
+    return EDN8_OK;
+}
 static bool cart_mounted;            // the USB link, as of the last cart poll
 static bool cart_boot_armed;         // the next menu appearance boots the ROM
 static bool player_boot_armed;
@@ -1034,7 +1047,7 @@ static void game_disc_insert(void)
     if (!rom) { printf("autoplay: no rom item on it\n"); return; }
 
     uint8_t st = 0xFF;
-    if (edn8_status(&st) != EDN8_OK) st = 0xFF;
+    if (cart_status(&st) != EDN8_OK) st = 0xFF;
     cart_st = st;
     if (rom_external) {
         printf("autoplay: cart-ROM mode, the disc's ROM is not pushed (J d ends it)\n");
@@ -1094,7 +1107,7 @@ static void audio_cd_insert(void)
         return;
     }
     uint8_t st = 0xFF;
-    if (edn8_status(&st) != EDN8_OK) { player_boot_armed = true; return; }
+    if (cart_status(&st) != EDN8_OK) { player_boot_armed = true; return; }
     cart_st = st;
     if (st == EDN8_ST_GAME && player_magic_ok()) {
         printf("autoplay: the CD player ROM is running - armed\n");
@@ -1109,6 +1122,41 @@ static void audio_cd_insert(void)
     player_launch();
 }
 
+static bool cart_lost(const char *why)
+{
+    set_booted(0);
+    magic_pending = false;
+    cart_boot_armed = autoplay_on && catalog_is_open();
+    player_boot_armed = autoplay_on && cdda_is_open();
+    bool was = player_armed() || game_on;
+    player_disarm();
+    if (game_on) game_disarm();
+    if (catalog_is_open() || cdda_is_open() || was)
+        printf("\ncart: %s%s\n", why, was ? " - trigger off" : "");
+    return catalog_is_open() || cdda_is_open() || was;
+}
+
+static bool drive_parked;
+static uint32_t parked_at;
+
+static bool drive_park(void)
+{
+    if (!identify[0] || disctask_busy()) return false;
+    if (drive_parked && atapi_motion_cmds == parked_at) return false;
+    bool again = drive_parked;
+    drive_parked = true;
+    int was = ata_nondata(ATA_CMD_CHECK_POWER);
+    int rc = atapi_start_stop(ATAPI_SS_STOP);
+    int sb = ata_nondata(ATA_CMD_STANDBY_NOW);
+    int now = ata_nondata(ATA_CMD_CHECK_POWER);
+    parked_at = atapi_motion_cmds;
+    if (again && now == 0) return false;
+    printf("\ncart: console off - stop %s, standby %s, power %02X -> %02X\n",
+           rc == ATAPI_OK ? "ok" : "refused", sb < 0 ? "refused" : "ok",
+           was & 0xFF, now & 0xFF);
+    return true;
+}
+
 // The cart's own state, once a second: the menu with a game disc's ROM not
 // running boots it, which is what a power-on, a reset and an insertion have
 // in common, and a ROM that starts carrying the CD player's magic arms the
@@ -1120,17 +1168,9 @@ static bool cart_poll(void)
 
     bool mounted = usb_link_state()->mounted;
     if (cart_mounted && !mounted) {
-        // Console off: the cart comes back on its menu, a new session.
-        set_booted(0);
         cart_st = -1;
-        cart_boot_armed = true;
-        player_boot_armed = cdda_is_open();
         cart_mounted = false;
-        magic_pending = false;
-        player_disarm();
-        printf("\ncart: link down - the %s reloads once the menu is back\n",
-               cdda_is_open() ? "CD player" : "game");
-        return true;
+        return cart_lost("link down");
     }
     cart_mounted = mounted;
     if (!mounted) return false;
@@ -1144,9 +1184,30 @@ static bool cart_poll(void)
     }
 
     uint8_t st;
-    if (edn8_status(&st) != EDN8_OK) { cart_st = -1; return false; }
+    if (cart_status(&st) != EDN8_OK) { cart_st = -1; return false; }
     int prev = cart_st;
     cart_st = st;
+    if (st == CART_ST_OFF) {
+        bool lost = prev != (int)CART_ST_OFF && cart_lost("console off");
+        return drive_park() || lost;
+    }
+    drive_parked = false;
+    static bool left_game;
+    bool out = false;
+    if (st == EDN8_ST_MENU && prev == (int)EDN8_ST_GAME) {
+        left_game = true;
+    } else if (st == EDN8_ST_MENU && left_game) {
+        left_game = false;
+        if (game_on) {
+            printf("\ncart: menu up - game trigger off\n");
+            game_disarm();
+            out = true;
+        }
+        cart_boot_armed = autoplay_on && catalog_is_open();
+        player_boot_armed = autoplay_on && cdda_is_open();
+    } else {
+        left_game = false;
+    }
     if (st == EDN8_ST_GAME && prev != (int)EDN8_ST_GAME && !player_armed()) {
         magic_pending = true;
         magic_due = make_timeout_time_ms(GAME_BOOT_POLL_MS);
@@ -1167,18 +1228,16 @@ static bool cart_poll(void)
         }
     }
     if (cdda_is_open()) {
-        if (st == EDN8_ST_GAME) { player_boot_armed = true; return false; }
         if (st != EDN8_ST_MENU || !player_boot_armed || player_armed()
             || rom_external || !autoplay_on)
-            return false;
+            return out;
         player_boot_armed = false;
         printf("\ncart: menu up - loading the CD player\n");
         player_launch();
         return true;
     }
-    if (!catalog_is_open()) return false;    // the rest is the disc's ROM
+    if (!catalog_is_open()) return out;      // the rest is the disc's ROM
     if (st == EDN8_ST_GAME) {
-        cart_boot_armed = true;
         // Cart-ROM mode: a ROM that just started is the game, fresh.
         if (!rom_external || prev == (int)EDN8_ST_GAME) return false;
         printf("\ncart: a ROM is running - armed against the disc\n");
@@ -1187,7 +1246,7 @@ static bool cart_poll(void)
     }
     // O 0 holds the menu: the cart can be used by hand with the disc in.
     if (st != EDN8_ST_MENU || !cart_boot_armed || rom_external || !autoplay_on)
-        return false;
+        return out;
     cart_boot_armed = false;
     printf("\ncart: menu up - loading \"%s\"\n", catalog_hdr()->title);
     game_launch();

@@ -56,6 +56,7 @@
 
 // Last sense data from a failed command: key, ASC, ASCQ.
 extern uint8_t atapi_sense_key, atapi_sense_asc, atapi_sense_ascq;
+extern volatile uint32_t atapi_motion_cmds;
 
 const char *atapi_strerror(int rc);
 const char *atapi_sense_text(uint8_t key);

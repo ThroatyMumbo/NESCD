@@ -5,6 +5,7 @@
 #include <string.h>
 
 uint8_t atapi_sense_key, atapi_sense_asc, atapi_sense_ascq;
+volatile uint32_t atapi_motion_cmds;
 
 // Per-DRQ chunk cap handed to the drive in the byte-count registers. Must be
 // even; the drive may return less per burst but never more.
@@ -37,6 +38,13 @@ int atapi_packet(const uint8_t cdb[ATAPI_CDB_LEN], void *buf, size_t maxlen,
 {
     if (got) *got = 0;
     if (!ata_wait_not_bsy(5000)) return ATAPI_ETIMEOUT;
+    switch (cdb[0]) {
+    case ATAPI_TEST_UNIT_READY: case ATAPI_REQUEST_SENSE: case ATAPI_INQUIRY:
+    case ATAPI_GET_EVENT_STATUS: case ATAPI_MODE_SENSE10:
+        break;
+    default:
+        atapi_motion_cmds++;
+    }
 
     uint16_t bc = (maxlen == 0 || maxlen > BCOUNT_MAX) ? BCOUNT_MAX : (uint16_t)maxlen;
     bc &= ~1u;
@@ -219,9 +227,16 @@ int atapi_tray_open(bool *open)
 int atapi_wait_ready(uint32_t timeout_ms)
 {
     absolute_time_t end = make_timeout_time_ms(timeout_ms);
+    bool started = false;
     for (;;) {
         int rc = atapi_test_unit_ready();
         if (rc == ATAPI_OK) return ATAPI_OK;
+        if (rc == ATAPI_ECHECK && atapi_sense_key == 0x02 && atapi_sense_asc == 0x04
+            && atapi_sense_ascq == 0x02 && !started) {
+            started = true;
+            atapi_start_stop(ATAPI_SS_START);
+            continue;
+        }
         if (rc == ATAPI_ECHECK) {
             // 2/04/xx = becoming ready; 6/28/00 = medium changed. Both retry.
             bool transient = (atapi_sense_key == 0x02 && atapi_sense_asc == 0x04)

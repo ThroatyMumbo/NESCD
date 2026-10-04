@@ -319,10 +319,15 @@ static uint16_t rd16(const uint8_t *p) { return (uint16_t)(p[0] | (p[1] << 8)); 
 
 int edn8_sys_info(edn8_sysinfo_t *out)
 {
+    return edn8_sys_info_ms(out, EDN8_T_CMD_MS);
+}
+
+int edn8_sys_info_ms(edn8_sysinfo_t *out, uint32_t idle_ms)
+{
     int rc = begin_cmd();
     if (rc != EDN8_OK) return rc;
     if ((rc = edn8_tx_cmd(EDN8_CMD_SYS_INF)) != EDN8_OK) return rc;
-    if ((rc = edn8_rx(out->raw, sizeof(out->raw), EDN8_T_CMD_MS)) != EDN8_OK) return rc;
+    if ((rc = edn8_rx(out->raw, sizeof(out->raw), idle_ms)) != EDN8_OK) return rc;
 
     const uint8_t *b = out->raw;
     out->serial_hi  = rd32(b + 20);

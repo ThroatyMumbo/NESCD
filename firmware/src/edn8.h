@@ -14,9 +14,12 @@
 #define EDN8_DEVICE_ID      0x17u
 #define EDN8_STATUS_KEY     0x5Au
 #define EDN8_STATUS_KEY_OLD 0xA5u
-// edn8_status() values, measured on the bench: the menu, or a ROM running.
+// edn8_status() is the MCU's flag byte (krikzz EDN8-PRO edio/everdrive.h): 00 is
+// the menu; FPG_OK is set while any game's core runs, UNLOCK only on some
+// (an MMC1 game reads 04, the CD player's NROM 05).
 #define EDN8_ST_MENU        0x00u
 #define EDN8_ST_GAME        0x05u
+#define EDN8_ST_FPG_OK      0x04u
 #define EDN8_USB_VID        0x38DFu
 #define EDN8_USB_PID        0x0017u
 
@@ -117,6 +120,7 @@ int  edn8_resync(void);
 int  edn8_status(uint8_t *st);
 int  edn8_check(void);
 int  edn8_sys_info(edn8_sysinfo_t *out);
+int  edn8_sys_info_ms(edn8_sysinfo_t *out, uint32_t idle_ms);
 
 // Region-checked: refuses anything at or above EDN8_ADDR_FCI_CFG.
 int  edn8_mem_wr(uint32_t addr, const void *data, size_t len);

@@ -83,6 +83,8 @@
 #define ATA_CMD_PACKET          0xA0u
 #define ATA_CMD_IDENTIFY_PACKET 0xA1u
 #define ATA_CMD_SET_FEATURES    0xEFu
+#define ATA_CMD_STANDBY_NOW     0xE0u
+#define ATA_CMD_CHECK_POWER     0xE5u
 #define ATA_FEAT_XFER_MODE      0x03u   // SECCOUNT = 0x00|mode for PIO flow
 
 // ---- bus timing ---------------------------------------------------------
@@ -172,6 +174,7 @@ void     ata_read_signature(uint8_t *mid, uint8_t *high);
 // IDENTIFY PACKET DEVICE (0xA1) into 256 words. A packet device aborts the
 // plain IDENTIFY DEVICE (0xEC), so this is the one that works on a CD-ROM.
 bool     ata_identify_packet(uint16_t *id256);
+int      ata_nondata(uint8_t cmd);
 
 // Extract a byte-swapped ASCII field from an IDENTIFY buffer (model = words
 // 27..46, firmware = 23..26, serial = 10..19), trimming trailing spaces.

@@ -559,6 +559,16 @@ bool ata_set_xfer_mode(uint mode)
     return !(ata_status() & (ATA_ST_ERR | ATA_ST_DF));
 }
 
+int ata_nondata(uint8_t cmd)
+{
+    if (!ata_wait_not_bsy(5000)) return -1;
+    ata_select_device(0);
+    ata_reg_write8(ATA_CS_CMD, ATA_REG_COMMAND, cmd);
+    if (!ata_wait_not_bsy(30000)) return -1;
+    if (ata_status() & (ATA_ST_ERR | ATA_ST_DF)) return -1;
+    return ata_reg_read8(ATA_CS_CMD, ATA_REG_SECCOUNT);
+}
+
 // Zeroed on failure: callers gate on id256[0], and a floating bus bursts 0x7f7f.
 // Some drives post the signature early and drop a command sent then - no DRQ,
 // no ERR - so a silent timeout is re-issued.
