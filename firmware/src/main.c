@@ -659,6 +659,16 @@ static bool media_poll(void)
     if (!was) { autoplay_pending = true; open_fails = 0; }
     if (!autoplay_pending) return false;
 
+    // No cart, no reason to read: the TOC and catalog reads are what spin it.
+    // edn8_open() is only tried once a device has enumerated, or it burns 2 s of every poll.
+    if (!edn8_is_open() &&
+        (!usb_link_state()->mounted || edn8_open(2000) != EDN8_OK)) {
+        if (autoplay_waiting) return false;
+        autoplay_waiting = true;
+        printf("\nautoplay: disc in, waiting for the cart link\n");
+        return true;
+    }
+
     // The kind of disc first, off its TOC: a READ(10) of an audio track fails
     // 5/64 and would be retried for a minute before the catalog gave up.
     if (!cdda_is_open() && !catalog_is_open()) {
@@ -689,17 +699,6 @@ static bool media_poll(void)
     if (!autoplay_on) {
         autoplay_pending = autoplay_waiting = false;
         printf("\nmedia: data disc in, autoplay off\n");
-        return true;
-    }
-
-    // The cart is the one thing worth waiting for: the NES may still be coming
-    // up when the disc goes in, so the insertion stays pending. edn8_open() is
-    // only tried once a device has enumerated, or it burns 2 s of every poll.
-    if (!edn8_is_open() &&
-        (!usb_link_state()->mounted || edn8_open(2000) != EDN8_OK)) {
-        if (autoplay_waiting) return false;
-        autoplay_waiting = true;
-        printf("\nautoplay: disc in, waiting for the cart link\n");
         return true;
     }
 
@@ -1118,7 +1117,7 @@ static bool cart_lost(const char *why)
 static bool drive_parked;
 static uint32_t parked_at;
 
-static bool drive_park(void)
+static bool drive_park(const char *why)
 {
     if (!identify[0] || disctask_busy()) return false;
     if (drive_parked && atapi_motion_cmds == parked_at) return false;
@@ -1130,7 +1129,7 @@ static bool drive_park(void)
     int now = ata_nondata(ATA_CMD_CHECK_POWER);
     parked_at = atapi_motion_cmds;
     if (again && now == 0) return false;
-    printf("\ncart: console off - stop %s, standby %s, power %02X -> %02X\n",
+    printf("\ncart: %s - stop %s, standby %s, power %02X -> %02X\n", why,
            rc == ATAPI_OK ? "ok" : "refused", sb < 0 ? "refused" : "ok",
            was & 0xFF, now & 0xFF);
     return true;
@@ -1152,7 +1151,7 @@ static bool cart_poll(void)
         return cart_lost("link down");
     }
     cart_mounted = mounted;
-    if (!mounted) return false;
+    if (!mounted) return drive_park("no cart link");
     // A cart that enumerates but does not answer costs 2 s per attempt, so
     // not every second.
     static absolute_time_t open_retry;
@@ -1168,7 +1167,7 @@ static bool cart_poll(void)
     cart_st = st;
     if (st == CART_ST_OFF) {
         bool lost = prev != (int)CART_ST_OFF && cart_lost("console off");
-        return drive_park() || lost;
+        return drive_park("console off") || lost;
     }
     drive_parked = false;
     static bool left_game;
