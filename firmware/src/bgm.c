@@ -35,7 +35,8 @@ static struct {
     bool     hole;                  // block missing: this seq plays as silence
     uint32_t amp;                   // Q16 fade
     volatile bool fading;
-    volatile bool hold;             // frozen at the cursor once amp reaches 0
+    volatile bool tail;
+    volatile bool hold;            // frozen at the cursor once amp reaches 0
     volatile bool ended;            // the fade ran out: the DAC can be released
     volatile bool done;             // a one-shot played out: nothing to resume
 } cur;
@@ -49,7 +50,12 @@ static void __not_in_flash_func(bgm_fill)(uint32_t *out, uint n)
 
     for (uint i = 0; i < n; i++) {
         if (cur.ended) { out[i] = 0; continue; }
-        if (cur.fading && cur.amp == 0) { cur.ended = true; out[i] = 0; continue; }
+        if (cur.fading && cur.amp == 0) {
+            cur.ended = true;
+            if (cur.tail) cur.done = true;
+            out[i] = 0;
+            continue;
+        }
         if (cur.hold && cur.amp == 0) { out[i] = 0; continue; }
         if (cur.ab.off >= cur.end_off) {
             cur.seq++;
@@ -73,7 +79,7 @@ static void __not_in_flash_func(bgm_fill)(uint32_t *out, uint n)
         }
         if (!src.loop && cur.seq + 1u == src.nblocks &&
             src.spr - cur.ab.off <= FADE_TAIL)
-            cur.fading = true;
+            cur.fading = cur.tail = true;
 
         int32_t l = 0, r = 0;
         if (!cur.hole) {
