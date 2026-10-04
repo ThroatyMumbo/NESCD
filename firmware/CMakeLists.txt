@@ -76,3 +76,27 @@ pico_enable_stdio_uart(nescd 1)
 target_compile_definitions(nescd PRIVATE PICO_CORE1_STACK_SIZE=4096)
 
 pico_add_extra_outputs(nescd)
+
+set(PLAYER_GAME ${CMAKE_CURRENT_LIST_DIR}/../game)
+set(PLAYER_N8P ${CMAKE_BINARY_DIR}/cdplayer.n8p)
+add_custom_command(
+    OUTPUT ${PLAYER_N8P}
+    COMMAND make -C ${PLAYER_GAME} build/cdplayer.nes
+    COMMAND python3 ${CMAKE_CURRENT_LIST_DIR}/tools/mkn8push.py --verify -o ${PLAYER_N8P}
+            ${PLAYER_GAME}/build/cdplayer.nes=cdplayer/cdplayer.nes
+            --boot cdplayer/cdplayer.nes
+    DEPENDS ${PLAYER_GAME}/cdplayer.s ${PLAYER_GAME}/gen_gfx.py ${PLAYER_GAME}/gen_font.py
+            ${PLAYER_GAME}/gen_tiles.py ${PLAYER_GAME}/game.cfg
+            ${PLAYER_GAME}/mkrom.py ${CMAKE_CURRENT_LIST_DIR}/tools/mkn8push.py
+    VERBATIM)
+set(PLAYER_ASM ${CMAKE_BINARY_DIR}/cdplayer_rom.S)
+file(WRITE ${PLAYER_ASM}.in
+    ".section .rodata.cdplayer_n8p, \"a\"\n"
+    ".balign 4\n"
+    ".global cdplayer_n8p, cdplayer_n8p_end\n"
+    "cdplayer_n8p:\n"
+    ".incbin \"${PLAYER_N8P}\"\n"
+    "cdplayer_n8p_end:\n")
+configure_file(${PLAYER_ASM}.in ${PLAYER_ASM} COPYONLY)
+target_sources(nescd PRIVATE ${PLAYER_ASM})
+set_source_files_properties(${PLAYER_ASM} PROPERTIES OBJECT_DEPENDS ${PLAYER_N8P})

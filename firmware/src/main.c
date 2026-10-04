@@ -1,15 +1,3 @@
-// main.c - the console. An ATAPI CD-ROM on one side, an EverDrive N8 Pro on
-// the other, and a PCM5102 hanging off the NES expansion port.
-//
-// Connect with picocom on the debugprobe's if01 CDC (115200 8N1); h lists the
-// commands. Bring-up order: 'i' proves the ATA wiring with no disc in the tray,
-// 'e'/'l' proves the CDB path, then 'c'/'d'/'b' exercise the read path.
-//
-// Between commands the console polls the tray, the cart and the game's mailbox,
-// so inserting a disc boots its game and plays its music with no command at
-// all. Only a tray edge counts as an insertion, and a disc already in at
-// power-on is one.
-
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -53,9 +41,6 @@ static bool __not_in_flash_func(run_led_tick)(repeating_timer_t *t)
     return true;
 }
 
-// Word-aligned so the burst reads take the DMA path: DMA_SIZE_32 ignores the
-// low address bits, so ata_read_data_burst() falls back to a CPU pop loop for
-// anything at an odd word offset.
 static uint16_t identify[256]                       __attribute__((aligned(4)));
 static uint8_t  sector[SECTOR_BYTES]                __attribute__((aligned(4)));
 static uint8_t  bulk[BULK_SECTORS * SECTOR_BYTES]   __attribute__((aligned(4)));
@@ -108,7 +93,8 @@ static void help(void)
            "               the disc's is never pushed; d: back to disc mode)\n"
            "  G [0|1]      arm the game's music mailbox against the open disc\n"
            "  S            track reader statistics and buffer depth\n"
-           "  O [0|1]      autoplay on insertion, and the disc's ROM on the menu (now %s)\n"
+           "  O [0|1]      autoplay on insertion, and the disc's ROM or the CD player\n"
+           "               on the menu (now %s)\n"
            "  Y            spin the drive up after a failed acquisition\n"
            "  (the panel button on GP33 toggles the tray, between commands)\n"
            "audio cd player (the NCDP ROM on the cart drives it through the mailbox):\n"
@@ -562,6 +548,7 @@ static void do_disc_stats(void)
 #define AUTOPLAY_BOOT_MS 3000u       // after the prompt: room to type J x first
 
 static void game_disc_insert(void);
+static void audio_cd_insert(void);
 static void disc_gone(void);
 
 // A track streams between commands, and then core1 owns the drive: nothing on
@@ -679,9 +666,9 @@ static bool media_poll(void)
             const cdda_toc_t *t = cdda_toc();
             uint8_t m, s;
             cdda_msf(t->leadout - t->start[t->first], &m, &s);
-            printf("\nmedia: audio cd, %u track(s), %u:%02u%s\n", t->last, m, s,
-                   player_armed() ? "" : " - start the CD player ROM to play it");
+            printf("\nmedia: audio cd, %u track(s), %u:%02u\n", t->last, m, s);
             player_disc_in();
+            if (autoplay_on) audio_cd_insert();
             return true;
         }
         if (rc == CD_EDISCIO && ++open_fails < GAME_OPEN_POLLS) {
@@ -777,17 +764,13 @@ static game_src_t game_src;
 
 static uint32_t booted_crc;          // the ROM item pushed this cart session
 
-// The cart's own state, polled once a second while a game disc is open.
 #define CART_POLL_MS 1000u
 #define CART_OPEN_RETRY_MS 5000u
 static absolute_time_t cart_due;
 static int  cart_st = -1;            // last edn8_status(), -1 unknown
 static bool cart_mounted;            // the USB link, as of the last cart poll
 static bool cart_boot_armed;         // the next menu appearance boots the ROM
-
-// The cart's own ROM is the game and the disc's item is never pushed, so a ROM
-// under development plays the disc's tracks. J x selects it, J d or a bare J
-// returns to disc mode.
+static bool player_boot_armed;
 static bool rom_external;
 
 // Survives a warm reset (every flash script), not a power-on, so a firmware
@@ -881,9 +864,6 @@ static bool game_poll(void)
     // stale byte would be read as a request from a game that is not running.
     if (cart_st != (int)EDN8_ST_GAME) return false;
 
-    // A disagreeing or failed read says nothing and the next tick asks again,
-    // but a run of them is a link that is up and useless: the game's music
-    // would never start and nothing would say why.
     uint8_t mb[2];
     int rc = mailbox_rd(mb);
     if (rc != CD_OK) {
@@ -1000,6 +980,7 @@ static void disc_gone(void)
     catalog_close();
     cdda_close();
     player_disc_out();
+    player_boot_armed = false;
     disc_speed_reset();
     if (game_src == SRC_DISC) game_src = SRC_NONE;
     media_present = false;
@@ -1080,6 +1061,54 @@ static void game_disc_insert(void)
 static bool magic_pending;
 static absolute_time_t magic_due;
 
+extern const uint8_t cdplayer_n8p[], cdplayer_n8p_end[];
+
+static bool player_launch(void)
+{
+    int rc = n8push_open_at(cdplayer_n8p, (size_t)(cdplayer_n8p_end - cdplayer_n8p), true);
+    if (rc == CD_OK) rc = n8push_run();
+    if (rc != CD_OK) {
+        printf("player: load failed - %s\n", cd_strerror(rc));
+        return false;
+    }
+    set_booted(0);
+    cart_st = (int)EDN8_ST_GAME;
+    magic_pending = true;
+    magic_due = make_timeout_time_ms(GAME_BOOT_POLL_MS);
+    printf("player: booted the CD player ROM\n");
+    return true;
+}
+
+static void audio_cd_insert(void)
+{
+    player_boot_armed = false;
+    if (player_armed()) return;
+    if (rom_external) {
+        printf("autoplay: cart-ROM mode, the CD player is not pushed (J d ends it)\n");
+        return;
+    }
+    if (!edn8_is_open() &&
+        (!usb_link_state()->mounted || edn8_open(2000) != EDN8_OK)) {
+        printf("autoplay: the CD player loads once the cart link is up\n");
+        player_boot_armed = true;
+        return;
+    }
+    uint8_t st = 0xFF;
+    if (edn8_status(&st) != EDN8_OK) { player_boot_armed = true; return; }
+    cart_st = st;
+    if (st == EDN8_ST_GAME && player_magic_ok()) {
+        printf("autoplay: the CD player ROM is running - armed\n");
+        player_arm(false);
+        return;
+    }
+    if (st != EDN8_ST_MENU) {
+        printf("autoplay: the CD player loads once the cart shows its menu\n");
+        player_boot_armed = true;
+        return;
+    }
+    player_launch();
+}
+
 // The cart's own state, once a second: the menu with a game disc's ROM not
 // running boots it, which is what a power-on, a reset and an insertion have
 // in common, and a ROM that starts carrying the CD player's magic arms the
@@ -1095,10 +1124,12 @@ static bool cart_poll(void)
         set_booted(0);
         cart_st = -1;
         cart_boot_armed = true;
+        player_boot_armed = cdda_is_open();
         cart_mounted = false;
         magic_pending = false;
         player_disarm();
-        printf("\ncart: link down - the game reloads once the menu is back\n");
+        printf("\ncart: link down - the %s reloads once the menu is back\n",
+               cdda_is_open() ? "CD player" : "game");
         return true;
     }
     cart_mounted = mounted;
@@ -1134,6 +1165,16 @@ static bool cart_poll(void)
             player_arm(true);
             return true;
         }
+    }
+    if (cdda_is_open()) {
+        if (st == EDN8_ST_GAME) { player_boot_armed = true; return false; }
+        if (st != EDN8_ST_MENU || !player_boot_armed || player_armed()
+            || rom_external || !autoplay_on)
+            return false;
+        player_boot_armed = false;
+        printf("\ncart: menu up - loading the CD player\n");
+        player_launch();
+        return true;
     }
     if (!catalog_is_open()) return false;    // the rest is the disc's ROM
     if (st == EDN8_ST_GAME) {

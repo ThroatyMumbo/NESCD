@@ -53,9 +53,7 @@ It'll auto-boot the game once it's read and uploaded to the Everdrive.
 
 Arguably the most practical use for this thing: A CD player!
 
-`make` in the `game` directory also builds `build/cdplayer.nes`. Copy the ROM to the Everdrive's SD card (or push it over USB),
-start it from the menu, and put any ordinary audio CD in the drive. I regret not thinking of this very obvious use case in the
-video I did this on thing. Oh well!
+Insert the CD while on the Everdrive menu and it should automatically launch the player.
 
 <img src="screenshots/cd_player.png" alt="Audio CD player" width="320">
 
