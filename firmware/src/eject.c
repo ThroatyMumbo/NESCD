@@ -9,37 +9,55 @@
 #include "atapi.h"
 #include "disc.h"
 
-static bool ready, armed, saw_low, down, was_high;
-static absolute_time_t high_since;
+#define EJECT_TICK_MS 5
+
+static repeating_timer_t tick_timer;
+static bool ready;
+static volatile bool armed, saw_low, down, pressed;
+static uint8_t low_ms, high_ms;
+
+// Sampled from a timer IRQ, so a press made while the main loop blocks still
+// counts, and a pad edge alone never does: ESD off a flying lead is nanoseconds.
+static bool __not_in_flash_func(eject_tick)(repeating_timer_t *t)
+{
+    (void)t;
+    if (gpio_is_dir_out(EJECT_PIN)) {      // 'p 33' owns the pad
+        down = true;
+        low_ms = high_ms = 0;
+        return true;
+    }
+    if (gpio_get(EJECT_PIN)) {
+        low_ms = 0;
+        if (down && (high_ms += EJECT_TICK_MS) >= EJECT_DEBOUNCE_MS) {
+            down = false;
+            armed = true;
+        }
+    } else {
+        high_ms = 0;
+        if (!armed) saw_low = true;
+        if (!down && (low_ms += EJECT_TICK_MS) >= EJECT_PRESS_MS) {
+            down = true;
+            pressed = true;
+        }
+    }
+    return true;
+}
 
 // Re-runnable, and 'p <gpio>' is why: that diagnostic hands the pad to SIO as
 // an output and does not give it back.
 void eject_init(void)
 {
-    // Only a pad something drove has edges to drop; a real press stays latched.
+    // Only a pad something drove has presses to drop; a real one stays latched.
     bool driven = !ready || gpio_get_function(EJECT_PIN) != GPIO_FUNC_SIO ||
                   gpio_is_dir_out(EJECT_PIN);
     gpio_init(EJECT_PIN);
     gpio_set_dir(EJECT_PIN, GPIO_IN);
     gpio_pull_up(EJECT_PIN);
     sleep_us(100);                         // let the pull-up take the pad
-    if (driven) gpio_acknowledge_irq(EJECT_PIN, GPIO_IRQ_EDGE_FALL);
+    if (driven) { down = true; pressed = false; }
     if (ready) return;
-    was_high = false;
     ready = true;
-}
-
-// INTR latches the edge whether or not the IRQ is enabled, so a press made
-// while the main loop blocks is still there when it next polls.
-static bool fell(void)
-{
-    return (io_bank0_hw->intr[EJECT_PIN / 8] >> (4 * (EJECT_PIN % 8)))
-           & GPIO_IRQ_EDGE_FALL;
-}
-
-static void clear_fell(void)
-{
-    gpio_acknowledge_irq(EJECT_PIN, GPIO_IRQ_EDGE_FALL);
+    add_repeating_timer_ms(EJECT_TICK_MS, eject_tick, NULL, &tick_timer);
 }
 
 // GESN's door bit first: some drives report 2/3A/00 open and shut alike. The
@@ -57,33 +75,15 @@ bool eject_pressed(void)
 {
     if (!ready) return false;
 
-    absolute_time_t t = get_absolute_time();
-    bool now = gpio_get(EJECT_PIN);
-    if (now && !was_high) high_since = t;
-    was_high = now;
-    bool settled = now && absolute_time_diff_us(high_since, t)
-                          >= EJECT_DEBOUNCE_MS * 1000;
-
-    // A pad low when polling starts is the reset leaving GP33 unpulled, not a
-    // press - reflashing would work the tray every time. Wait for a release.
-    if (!armed) {
-        if (!now) saw_low = true;
-        if (!settled) return false;
-        armed = true;
-        clear_fell();
-        if (saw_low) printf("\n  button: GP%u was low at boot - tray untouched\n",
-                            (unsigned)EJECT_PIN);
-        return false;
+    // A pad low at boot is a held button or the reset leaving GP33 unpulled,
+    // not a press - reflashing would work the tray every time.
+    if (armed && saw_low) {
+        saw_low = false;
+        printf("\n  button: GP%u was low at boot - tray untouched\n",
+               (unsigned)EJECT_PIN);
     }
-
-    // Held, or bouncing on release: no new press until it has settled high.
-    if (down) {
-        if (settled) { down = false; clear_fell(); }
-        return false;
-    }
-    if (!fell()) return false;
-    clear_fell();
-    down = true;
+    if (!pressed) return false;
+    pressed = false;
     return true;
 }
 

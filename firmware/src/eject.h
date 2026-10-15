@@ -15,7 +15,8 @@
 #include <stdbool.h>
 
 #define EJECT_PIN     33u
-#define EJECT_DEBOUNCE_MS 25
+#define EJECT_DEBOUNCE_MS 25    // high this long before the next press
+#define EJECT_PRESS_MS    20    // low this long to count as a press
 
 void eject_init(void);
 
